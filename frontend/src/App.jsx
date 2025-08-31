@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Welcome from "./pages/Welcome";
 import EmailVerification from "./pages/EmailVerification";
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import Profile from "./pages/forms/Profile";
@@ -42,6 +43,7 @@ const adminRoutes = [
   { path: "projectManagement", element: <AdminPages.ProjectManagement /> },
   { path: "socialServices", element: <AdminPages.SocialServices /> },
   { path: "disbursements", element: <AdminPages.Disbursements /> },
+  { path: "activityLogs", element: <AdminPages.ActivityLogs /> },
 ];
 
 // --- Resident Routes ---
@@ -102,6 +104,7 @@ function App() {
         <Route path="/" element={<Welcome />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
         <Route path="/email/verify" element={<EmailVerification />} />
         <Route path="/user/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
         <Route path="/residency-verification" element={<ResidencyVerification />} />

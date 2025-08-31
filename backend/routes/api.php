@@ -18,6 +18,8 @@ use App\Http\Controllers\EmergencyHotlineController;
 use App\Http\Controllers\DisasterEmergencyRecordController;
 use App\Http\Controllers\FinancialRecordController;
 use App\Http\Controllers\DocumentRequestController;
+use App\Http\Controllers\ActivityLogController;
+use App\Http\Controllers\ResidencyStatusController;
 
 /*
 |--------------------------------------------------------------------------
@@ -220,8 +222,18 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::post('/emergency-hotlines', [EmergencyHotlineController::class, 'store']);
         Route::put('/emergency-hotlines/{id}', [EmergencyHotlineController::class, 'update']);
         Route::delete('/emergency-hotlines/{id}', [EmergencyHotlineController::class, 'destroy']);
-    });
 
+
+        Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+        Route::get('/activity-logs/{id}', [ActivityLogController::class, 'show']);
+        Route::get('/activity-logs/statistics/summary', [ActivityLogController::class, 'statistics']);
+        Route::get('/activity-logs/filters/options', [ActivityLogController::class, 'filters']);
+        Route::post('/activity-logs/export', [ActivityLogController::class, 'export']);
+        Route::delete('/activity-logs/cleanup', [ActivityLogController::class, 'cleanup']);
+
+        // Residency Status update by admin
+        Route::post('/residency-status/{userId}', [ResidencyStatusController::class, 'updateStatus']);
+    });
     /*
     |--------------------------------------------------------------------------
     | Shared Authenticated Routes

@@ -1,6 +1,22 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from '../utils/axiosConfig';
 
+// Add Axios interceptor to include auth token in requests
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  console.log('Retrieved token:', token); // Debugging log
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+    console.log('Authorization header set:', config.headers.Authorization); // Debugging log
+  } else {
+    console.warn('No token found in localStorage'); // Debugging log
+  }
+  return config;
+}, (error) => {
+  console.error('Error in Axios request interceptor:', error); // Debugging log
+  return Promise.reject(error);
+});
+
 const AuthContext = createContext();
 
 const useAuth = () => useContext(AuthContext);
@@ -12,30 +28,23 @@ const AuthProvider = ({ children }) => {
   // Fetch user profile
   const fetchUser = async () => {
     try {
-      // Always send credentials for protected requests
-      const res = await axios.get('/profile');
-      
-      // DEBUG: Log the raw response
-      console.log('AuthContext fetchUser raw response:', res.data);
-      
-      // Fix: Merge profile data into user object for navbar access
-      let userData = res.data.user || res.data || null;
-      if (userData && res.data.profile) {
-        userData.profile = res.data.profile;
+      // get basic user info first
+      const userRes = await axios.get('/user');
+      const baseUser = userRes.data;
+      // set user early so UI can show role-specific UI
+      setUser(baseUser);
+      localStorage.setItem('user', JSON.stringify(baseUser || {}));
+
+      // only fetch resident profile for resident users
+      if (baseUser?.role === 'residents') {
+        const profileRes = await axios.get('/profile');
+        const resident = profileRes.data;
+        // merge if needed (controller returns resident payload)
+        const userData = { ...baseUser, profile: resident.profile ?? resident };
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData || {}));
       }
 
-      // DEBUG: Log the final user data
-      console.log('AuthContext final userData:', userData);
-      console.log('AuthContext avatar value:', userData?.profile?.avatar);
-
-      setUser(userData);
-
-      // Sync residentId if available
-      if (userData?.profile?.residents_id) {
-        localStorage.setItem('residentId', userData.profile.residents_id);
-      }
-      // Store user in localStorage for use in Login.jsx
-      localStorage.setItem('user', JSON.stringify(userData || {}));
       setIsLoading(false);
     } catch (err) {
       console.error('AuthContext fetchUser error:', err);
@@ -74,7 +83,7 @@ const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     // Get CSRF cookie first for Sanctum
     // Use direct URL to bypass axios baseURL prefix for web routes
-    await axios.get(window.location.origin + '/sanctum/csrf-cookie');
+  await axios.get(window.location.origin + '/sanctum/csrf-cookie');
     // Login with credentials
     const res = await axios.post('/login', { email, password });
     const token = res.data.token || res.data.access_token;

@@ -5,12 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Mail\EmailVerificationMail;
 use App\Mail\VerificationCodeMail;
+use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Support\Str;
+
+use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
@@ -59,6 +62,10 @@ class AuthController extends Controller
                 'email'    => 'required|string|email|unique:users',
                 'password' => 'required|string|min:8',
                 'role'     => 'nullable|string|in:admin,staff,treasurer,residents',
+                'agree_privacy_policy' => 'required|accepted',
+            ], [
+                'agree_privacy_policy.required' => 'You must agree to the privacy policy to register.',
+                'agree_privacy_policy.accepted' => 'You must accept the privacy policy to register.',
             ]);
             
             \Log::info('Validation passed:', $validated);
@@ -91,6 +98,8 @@ class AuthController extends Controller
                 'role' => $request->role ?? 'residents',
                 'verification_code' => $verificationCode,
                 'verification_code_expires_at' => now()->addMinute(),
+                'privacy_policy_accepted' => true,
+                'privacy_policy_accepted_at' => now(),
             ]);
 
             \Log::info('User created successfully:', [
@@ -99,6 +108,9 @@ class AuthController extends Controller
                 'verification_code' => $user->verification_code,
                 'verification_code_expires_at' => $user->verification_code_expires_at
             ]);
+
+            // Log user registration
+            ActivityLogService::logCreated($user, $request);
 
             // Send verification code email
             try {
@@ -305,7 +317,13 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // Update last activity timestamp
+        $user->updateLastActivity();
+
         $token = $user->createToken('api-token')->plainTextToken;
+
+        // Log successful login
+        ActivityLogService::logAuth('login', $request);
 
         return response()->json([
             'message' => 'Login successful.',
@@ -320,8 +338,11 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
+        // Log logout before deleting tokens
+        ActivityLogService::logAuth('logout', $request);
+
         $request->user()->tokens()->delete();
-        
+
         return response()->json([
             'message' => 'Logged out successfully.'
         ]);

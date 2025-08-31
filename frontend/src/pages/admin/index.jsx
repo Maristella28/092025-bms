@@ -11,3 +11,4 @@ export { default as InventoryAssets } from './InventoryAssets';
 export { default as ProjectManagement } from './ProjectManagement';
 export { default as SocialServices } from './modules/SocialServices/SocialServices';
 export { default as Disbursements } from './Disbursements';
+export { default as ActivityLogs } from './ActivityLogs';

@@ -7,6 +7,7 @@ export default function Register() {
     password: '',
     confirmPassword: '',
     termsAccepted: false,
+    privacyPolicyAccepted: false,
     role: 'residents', // Add default role
   });
 
@@ -78,6 +79,13 @@ export default function Register() {
       return;
     }
 
+    if (!form.privacyPolicyAccepted) {
+      setError("You must accept the privacy policy to register.");
+      setStatus('');
+      setIsSuccess(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/register', {
         method: 'POST',
@@ -89,7 +97,8 @@ export default function Register() {
           name: form.name,
           email: form.email,
           password: form.password,
-          role: form.role, // Include role in the request
+          role: form.role,
+          agree_privacy_policy: form.privacyPolicyAccepted,
         }),
       });
 
@@ -414,19 +423,36 @@ export default function Register() {
               />
             </div>
 
-            <div className="flex items-center space-x-3">
-              <input
-                id="terms"
-                type="checkbox"
-                name="termsAccepted"
-                checked={form.termsAccepted}
-                onChange={handleChange}
-                className="w-5 h-5 rounded border border-gray-300 dark:border-gray-500 bg-gray-100 dark:bg-gray-700 text-blue-600 focus:ring-2 focus:ring-blue-500"
-              />
-              <label htmlFor="terms" className="text-sm font-light text-gray-600 dark:text-gray-300">
-                I accept the
-                <a href="#" className="font-medium text-blue-600 hover:underline dark:text-blue-400"> Terms and Conditions</a>
-              </label>
+            <div className="space-y-3">
+              <div className="flex items-center space-x-3">
+                <input
+                  id="terms"
+                  type="checkbox"
+                  name="termsAccepted"
+                  checked={form.termsAccepted}
+                  onChange={handleChange}
+                  className="w-5 h-5 rounded border border-gray-300 dark:border-gray-500 bg-gray-100 dark:bg-gray-700 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                />
+                <label htmlFor="terms" className="text-sm font-light text-gray-600 dark:text-gray-300">
+                  I accept the
+                  <a href="#" className="font-medium text-blue-600 hover:underline dark:text-blue-400"> Terms and Conditions</a>
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <input
+                  id="privacy"
+                  type="checkbox"
+                  name="privacyPolicyAccepted"
+                  checked={form.privacyPolicyAccepted}
+                  onChange={handleChange}
+                  className="w-5 h-5 rounded border border-gray-300 dark:border-gray-500 bg-gray-100 dark:bg-gray-700 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                />
+                <label htmlFor="privacy" className="text-sm font-light text-gray-600 dark:text-gray-300">
+                  I have read and agree to the
+                  <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="font-medium text-blue-600 hover:underline dark:text-blue-400"> Privacy Policy</a>
+                </label>
+              </div>
             </div>
 
             <button

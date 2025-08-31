@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Resident;
 use App\Models\Profile;
+use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -68,6 +69,10 @@ class ResidentController extends Controller
             'residents_id' => $profile->residents_id,
             'avatar'     => $data['avatar'] ?? null,
         ]);
+
+        // Log resident creation
+        ActivityLogService::logCreated($resident, $request);
+        ActivityLogService::logCreated($profile, $request);
 
         return response()->json([
             'message'  => '✅ Profile and Resident successfully saved.',
@@ -169,6 +174,10 @@ class ResidentController extends Controller
         $resident->fill($data);
         $resident->last_modified = now(); // Set last modified timestamp
         $resident->save();
+
+        // Log resident update
+        ActivityLogService::logUpdated($resident, $resident->getOriginal(), $request);
+        ActivityLogService::logUpdated($profile, $profile->getOriginal(), $request);
 
         // Check if resident should be flagged for review
         $this->checkAndFlagForReview($resident);

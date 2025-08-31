@@ -18,6 +18,10 @@ class Kernel extends ConsoleKernel
     // Daily check to mark residents for review based on activity.
     // Runs at 01:00 every day.
     $schedule->command('residents:check-review')->dailyAt('01:00')->withoutOverlapping();
+
+    // Daily check for inactive users and flag them for review.
+    // Runs at 02:00 every day.
+    $schedule->command('users:check-inactive')->dailyAt('02:00')->withoutOverlapping();
     }
 
     /**

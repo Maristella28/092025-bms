@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   LayoutDashboard, Users, FileText, Home, Book,
   DollarSign, UserCog, Megaphone, Handshake, AlertTriangle,
-  Boxes, Projector
+  Boxes, Projector, Activity
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -26,6 +26,7 @@ const Sidebar = () => {
     { title: "Disaster & Emergency", icon: <AlertTriangle size={iconSize} />, path: "/admin/disasterEmergency" },
     { title: "Project Management", icon: <Projector size={iconSize} />, path: "/admin/projectManagement" },
     { title: "Inventory Assets", icon: <Boxes size={iconSize} />, path: "/admin/inventoryAssets" },
+    { title: "Activity Logs", icon: <Activity size={iconSize} />, path: "/admin/activityLogs" },
   ];
 
   const staffItems = [
