@@ -23,6 +23,8 @@ class Profile extends Model
         'special_categories' => 'array',
         'vaccine_received' => 'array',
         'profile_completed' => 'boolean',
+        'permissions' => 'array',
+        'my_benefits_enabled' => 'boolean',
     ];
 
     protected $fillable = [
@@ -68,6 +70,8 @@ class Profile extends Model
         'verification_status',
         'denial_reason',
         'profile_completed',
+        'permissions',
+        'my_benefits_enabled',
     ];
     /**
      * Relationship: Profile belongs to a user.
@@ -83,6 +87,7 @@ class Profile extends Model
      */
     public function resident()
     {
-        return $this->hasOne(Resident::class, 'residents_id', 'residents_id');
+        // Link via the shared resident_id string column on both models
+        return $this->hasOne(Resident::class, 'resident_id', 'resident_id');
     }
 }

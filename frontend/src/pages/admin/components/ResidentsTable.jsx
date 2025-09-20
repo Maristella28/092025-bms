@@ -1,12 +1,12 @@
 import React from 'react';
-import { EyeIcon, XMarkIcon } from "@heroicons/react/24/solid";
+import { EyeIcon, TrashIcon } from "@heroicons/react/24/solid";
 
 export default function ResidentsTable({
   data,
   formatResidentName,
   getResidentStatus,
   handleShowDetails,
-  handleRestore,
+  handleDelete,
   handleUpdate,
 }) {
   return (
@@ -20,6 +20,7 @@ export default function ResidentsTable({
             <th className="px-6 py-4 text-left font-semibold text-gray-700">Verification</th>
             <th className="px-6 py-4 text-left font-semibold text-gray-700">Last Modified</th>
             <th className="px-6 py-4 text-left font-semibold text-gray-700">Review Flag</th>
+            <th className="px-6 py-4 text-left font-semibold text-gray-700">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -60,6 +61,15 @@ export default function ResidentsTable({
                 ) : (
                   <span className="text-gray-400 text-xs">-</span>
                 )}
+              </td>
+              <td className="px-6 py-4">
+                <button
+                  onClick={() => handleDelete(resident)}
+                  className="text-red-600 hover:text-red-900 ml-3"
+                  title="Delete Resident"
+                >
+                  <TrashIcon className="h-5 w-5" />
+                </button>
               </td>
             </tr>
           ))}

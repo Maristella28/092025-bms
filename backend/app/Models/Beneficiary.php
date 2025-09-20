@@ -14,6 +14,7 @@ class Beneficiary extends Model
         'name',
         'beneficiary_type',
         'status',
+        'my_benefits_enabled',
         'assistance_type',
         'amount',
         'contact_number',

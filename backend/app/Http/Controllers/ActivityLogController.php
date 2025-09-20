@@ -101,7 +101,16 @@ class ActivityLogController extends Controller
     {
         $user = Auth::user();
 
+        \Log::info('Filters method accessed', [
+            'user_id' => $user->id ?? null,
+            'user_role' => $user->role ?? null,
+        ]);
+
         if ($user->role !== 'admin') {
+            \Log::warning('Unauthorized access to filters method', [
+                'user_id' => $user->id ?? null,
+                'user_role' => $user->role ?? null,
+            ]);
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -115,6 +124,10 @@ class ActivityLogController extends Controller
                 ->get()
                 ->pluck('user'),
         ];
+
+        \Log::info('Filters method response', [
+            'filters' => $filters,
+        ]);
 
         return response()->json(['filters' => $filters]);
     }
@@ -171,6 +184,48 @@ class ActivityLogController extends Controller
         return response()->json([
             'message' => "Successfully deleted {$deletedCount} old activity logs",
             'deleted_count' => $deletedCount,
+        ]);
+    }
+
+    /**
+     * Security alerts (placeholder implementation)
+     */
+    public function securityAlerts(Request $request)
+    {
+        $user = Auth::user();
+        if ($user->role !== 'admin') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        return response()->json([
+            'alerts' => [],
+        ]);
+    }
+
+    /**
+     * Audit summary (basic metrics)
+     */
+    public function auditSummary(Request $request)
+    {
+        $user = Auth::user();
+        if ($user->role !== 'admin') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $dateFrom = $request->get('date_from', now()->subDays(30));
+        $dateTo = $request->get('date_to', now());
+
+        $successfulOperations = ActivityLog::whereBetween('created_at', [$dateFrom, $dateTo])->count();
+        $failedOperations = ActivityLog::whereBetween('created_at', [$dateFrom, $dateTo])
+            ->where('action', 'like', '%failed%')
+            ->count();
+
+        return response()->json([
+            'audit_summary' => [
+                'successful_operations' => $successfulOperations,
+                'failed_operations' => $failedOperations,
+                'avg_response_time' => 0,
+            ],
         ]);
     }
 }

@@ -7,6 +7,25 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notifiable;
 
+/**
+ * @property int $user_id
+ * @property string $document_type
+ * @property string|null $certification_type
+ * @property array|null $fields
+ * @property array|null $certification_data
+ * @property string $status
+ * @property string|null $processing_notes
+ * @property string $priority
+ * @property \Carbon\Carbon|null $estimated_completion
+ * @property \Carbon\Carbon|null $completed_at
+ * @property string|null $attachment
+ * @property string|null $pdf_path
+ * @property string|null $photo_path
+ * @property string|null $photo_type
+ * @property array|null $photo_metadata
+ * @property-read \App\Models\User $user
+ * @property-read \App\Models\Resident|null $resident
+ */
 class DocumentRequest extends Model
 {
     use HasFactory, Notifiable, SoftDeletes;

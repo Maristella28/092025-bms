@@ -35,14 +35,68 @@ class ResidencyStatusController extends Controller
             $admin->id
         );
 
+        // When residency is set to active, also approve verification on the resident/profile
+        if ($request->input('residency_status') === 'active') {
+            $resident = \App\Models\Resident::where('user_id', $user->id)
+                ->with('profile')
+                ->orderByRaw("CASE WHEN verification_status = 'approved' THEN 0 ELSE 1 END")
+                ->orderByDesc('updated_at')
+                ->first();
+
+            if ($resident) {
+                $resident->verification_status = 'approved';
+                $resident->save();
+
+                if ($resident->profile) {
+                    $resident->profile->verification_status = 'approved';
+                    $resident->profile->denial_reason = null;
+                    $resident->profile->save();
+                }
+
+                \Log::info('Auto-approved verification due to active residency status', [
+                    'user_id' => $user->id,
+                    'resident_id' => $resident->id,
+                ]);
+            }
+        }
+
         // Optionally log this action in activity logs (if ActivityLogService is available)
-        if (class_exists(\App\Services\ActivityLogService::class)) {
-            \App\Services\ActivityLogService::logCustom(
-                'residency_status_update',
-                "Residency status updated from {$previousStatus} to {$user->residency_status} by admin {$admin->name}",
-                $user,
-                ['previous_status' => $previousStatus, 'new_status' => $user->residency_status]
-            );
+        $serviceClass = '\\App\\Services\\ActivityLogService';
+        if (class_exists($serviceClass)) {
+            $service = app($serviceClass);
+            $logMessage = "Residency status updated from {$previousStatus} to {$user->residency_status} by admin " . ($admin->name ?? $admin->id);
+
+            if (is_object($service) && method_exists($service, 'logCustom')) {
+                // Use dynamic call to avoid static analysis errors when the class isn't present in all envs
+                call_user_func([$service, 'logCustom'],
+                    'residency_status_update',
+                    $logMessage,
+                    $user,
+                    ['previous_status' => $previousStatus, 'new_status' => $user->residency_status]
+                );
+            } elseif (is_object($service) && method_exists($service, 'log')) {
+                call_user_func([$service, 'log'],
+                    'residency_status_update',
+                    $logMessage,
+                    ['user_id' => $user->id, 'previous_status' => $previousStatus, 'new_status' => $user->residency_status]
+                );
+            } else {
+                \Illuminate\Support\Facades\Log::info('residency_status_update', [
+                    'message' => "Residency status updated from {$previousStatus} to {$user->residency_status}",
+                    'by_admin' => $admin->id,
+                    'user_id' => $user->id,
+                    'previous_status' => $previousStatus,
+                    'new_status' => $user->residency_status,
+                ]);
+            }
+        } else {
+            \Illuminate\Support\Facades\Log::info('residency_status_update', [
+                'message' => "Residency status updated from {$previousStatus} to {$user->residency_status}",
+                'by_admin' => $admin->id,
+                'user_id' => $user->id,
+                'previous_status' => $previousStatus,
+                'new_status' => $user->residency_status,
+            ]);
         }
 
         return response()->json([

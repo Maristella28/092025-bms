@@ -84,29 +84,53 @@ class ResidentController extends Controller
     // 📄 Get all residents with profiles
     public function index()
     {
-        $residents = Resident::with('profile')->get();
+        \Log::info('Admin is fetching residents list');
+        
+        try {
+            $residents = Resident::with(['profile', 'user'])->get();
+            $now = \Carbon\Carbon::now();
 
-        $now = \Carbon\Carbon::now();
-        $residents = $residents->map(function ($resident) use ($now) {
-            $lastUpdated = $resident->updated_at;
-            $months = $lastUpdated ? $now->diffInMonths($lastUpdated) : null;
-            if ($months === null) {
-                $updateStatus = 'Needs Verification';
-            } elseif ($months < 6) {
-                $updateStatus = 'Active';
-            } elseif ($months < 12) {
-                $updateStatus = 'Outdated';
-            } else {
-                $updateStatus = 'Needs Verification';
-            }
-            $resident->update_status = $updateStatus;
-            $resident->for_review = $months !== null && $months >= 12;
-            return $resident;
-        });
+            $processedResidents = $residents->map(function ($resident) use ($now) {
+                $lastUpdated = $resident->getAttribute('updated_at');
+                $months = $lastUpdated ? $now->diffInMonths($lastUpdated) : null;
 
-        return response()->json([
-            'residents' => $residents
-        ]);
+                // Compute update status
+                if ($months === null) {
+                    $updateStatus = 'Needs Verification';
+                } elseif ($months < 6) {
+                    $updateStatus = 'Active';
+                } elseif ($months < 12) {
+                    $updateStatus = 'Outdated';
+                } else {
+                    $updateStatus = 'Needs Verification';
+                }
+
+                // Merge profile data into resident
+                $profileData = $resident->profile ? $resident->profile->toArray() : [];
+                $residentData = $resident->toArray();
+
+                return array_merge($residentData, $profileData, [
+                    'update_status' => $updateStatus,
+                    'for_review' => $months !== null && $months >= 12,
+                    'last_modified' => $resident->updated_at,
+                ]);
+            });
+
+            \Log::info('Found residents', ['count' => $processedResidents->count()]);
+            
+            return response()->json([
+                'success' => true,
+                'count' => $processedResidents->count(),
+                'residents' => $processedResidents
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching residents: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching residents',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // 👤 Get current user's resident profile
@@ -166,6 +190,7 @@ class ResidentController extends Controller
             }
             $data['avatar'] = $request->file('avatar')->store('avatars', 'public');
             $profile->avatar = $data['avatar'];
+            // @phpcs:ignore
             $resident->avatar = $data['avatar'];
         }
 
@@ -293,16 +318,18 @@ class ResidentController extends Controller
     private function checkAndFlagForReview(Resident $resident)
     {
         $now = now();
-        $lastModified = $resident->last_modified;
-        $lastLogin = $resident->user->has_logged_in ? $resident->user->updated_at : null;
+        $lastModified = $resident->getAttribute('last_modified');
+        $lastLogin = ($resident->user && $resident->user->getAttribute('has_logged_in'))
+            ? $resident->user->getAttribute('updated_at')
+            : null;
 
         // If no activity in the last year, flag for review
-        $lastActivity = max($lastModified, $lastLogin);
+        $lastActivity = $lastModified && $lastLogin ? max($lastModified, $lastLogin) : ($lastModified ?? $lastLogin);
         
         if (!$lastActivity || $lastActivity->diffInMonths($now) >= 12) {
-            $resident->for_review = true;
+            $resident->setAttribute('for_review', true);
         } else {
-            $resident->for_review = false;
+            $resident->setAttribute('for_review', false);
         }
         
         $resident->save();
@@ -314,11 +341,22 @@ class ResidentController extends Controller
         $residents = Resident::with('user')->get();
         $updatedCount = 0;
 
+        // Debug: Check if for_review column exists
+        // @phpcs:ignore
+        $hasForReviewColumn = \Illuminate\Support\Facades\Schema::hasColumn('residents', 'for_review');
+        $hasLastModifiedColumn = \Illuminate\Support\Facades\Schema::hasColumn('residents', 'last_modified');
+        \Log::info('Column existence check', [
+            'for_review_exists' => $hasForReviewColumn,
+            'last_modified_exists' => $hasLastModifiedColumn
+        ]);
+
         foreach ($residents as $resident) {
-            $originalStatus = $resident->for_review;
+            // Preserve original value using accessor
+            $originalStatus = $resident->getAttribute('for_review');
             $this->checkAndFlagForReview($resident);
-            
-            if ($resident->for_review !== $originalStatus) {
+
+            // Compare using accessor to avoid magic property access
+            if ($resident->getAttribute('for_review') !== $originalStatus) {
                 $updatedCount++;
             }
         }
@@ -326,5 +364,78 @@ class ResidentController extends Controller
         return response()->json([
             'message' => "Review status checked for {$residents->count()} residents. {$updatedCount} records updated."
         ]);
+    }
+
+    /**
+     * Soft delete a resident
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function destroy($id)
+    {
+        try {
+            $resident = Resident::findOrFail($id);
+            
+            // Log the deletion
+            ActivityLogService::logDeleted($resident, request());
+            
+            // Perform soft delete
+            $resident->delete();
+            
+            // If resident has an associated profile, soft delete that too
+            if ($resident->profile) {
+                $resident->profile->delete();
+            }
+
+            return response()->json([
+                'message' => 'Resident has been moved to Recently Deleted.',
+                'resident' => $resident
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to delete resident', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete resident.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all soft deleted residents
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function trashed()
+    {
+        try {
+            $deletedResidents = Resident::onlyTrashed()
+                ->with(['profile' => function($query) {
+                    $query->withTrashed();
+                }])
+                ->get();
+
+            return response()->json([
+                'residents' => $deletedResidents,
+                'message' => 'Successfully retrieved deleted residents'
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to fetch deleted residents', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to fetch deleted residents.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }

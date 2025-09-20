@@ -35,7 +35,24 @@ class Handler extends ExceptionHandler
     public function register()
     {
         $this->reportable(function (Throwable $e) {
-            //
+            \Log::error('Application error:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
         });
+
+        // Return detailed errors in development
+        if (config('app.debug')) {
+            $this->renderable(function (Throwable $e) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => collect($e->getTrace())->take(3)->toArray()
+                ], 500);
+            });
+        }
     }
 }

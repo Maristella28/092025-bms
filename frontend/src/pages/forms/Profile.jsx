@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import Navbares from '../../components/Navbares';
 import Sidebares from '../../components/Sidebares';
 import { useAuth } from '../../contexts/AuthContext';
 import axiosInstance from '../../utils/axiosConfig';
-import ResidencyVerification from './ResidencyVerification'; // Import the new component
+import { isProfileComplete, getMissingFields, getProfileCompletionPercentage, fieldLabels } from '../../utils/profileValidation';
+import SecureImage from '../../components/security/SecureImage';
+import ProfileCompletionIndicator from '../../components/ProfileCompletionIndicator';
+import ResidencyVerification from "./ResidencyVerification";
 import {
   User, Mail, Phone, Calendar, Home, MapPin, BadgeCheck,
   Landmark, Cake, Image as ImageIcon, Edit2, Save, X, ArrowLeft, AlertCircle
@@ -62,7 +65,9 @@ const formatDate = (dateString) => {
 
 const Profile = () => {
   const navigate = useNavigate();
-  const { forceRefresh } = useAuth();
+  const { forceRefresh, user } = useAuth();
+  const [completionPercentage, setCompletionPercentage] = useState(0);
+  const [shouldRedirect, setShouldRedirect] = useState(false);
 
   const [form, setForm] = useState({
     first_name: '',
@@ -138,11 +143,11 @@ const Profile = () => {
     <div className="flex flex-col items-center justify-center w-full py-16">
       <div className="bg-gradient-to-br from-green-100 via-emerald-50 to-blue-100 rounded-3xl shadow-2xl border border-green-200 p-10 max-w-xl w-full flex flex-col items-center animate-fade-in">
         <div className="relative mb-6">
-          <img
+          <SecureImage
             src={form.current_photo
               ? (typeof form.current_photo === 'string'
                   ? `http://localhost:8000/storage/${form.current_photo}`
-                  : URL.createObjectURL(form.current_photo))
+                  : form.current_photo)
               : 'https://flowbite.com/docs/images/people/profile-picture-5.jpg'}
             alt="Profile Completed"
             className="w-32 h-32 object-cover rounded-full border-4 border-green-400 shadow-lg"
@@ -184,12 +189,22 @@ const Profile = () => {
       .then(res => {
         const profile = res.data?.user?.profile || res.data?.profile || res.data;
         if (!profile) return;
+        
+        console.log('Initial profile load:', profile); // Debug log
+        
+        // If profile is approved and new, set editing mode
+        if (profile.verification_status === 'approved' && !profile.profile_completed) {
+          setIsEditing(true);
+        }
+        
         setForm(prev => {
           // If the backend returns 'avatar', treat it as 'current_photo' for backward compatibility
           let currentPhoto = profile.current_photo || profile.avatar || null;
+          
           return {
             ...prev,
             ...profile,
+            verification_status: profile.verification_status, // Ensure verification status is set
             birth_date: formatDate(profile.birth_date),
             special_categories: Array.isArray(profile.special_categories) ? profile.special_categories : [],
             vaccine_received: Array.isArray(profile.vaccine_received) ? profile.vaccine_received : [],
@@ -215,6 +230,66 @@ const Profile = () => {
       .finally(() => setLoading(false));
   // Only run once on mount to prevent repeated API calls and redirect loops
   }, []);
+
+  // Auto-refresh profile when verification is not yet approved
+  useEffect(() => {
+    // Don't poll if already approved
+    if (form.verification_status === 'approved') return;
+    
+    let isSubscribed = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await axiosInstance.get('/profile');
+        const profile = res.data?.user?.profile || res.data?.profile || res.data;
+        if (!profile || !isSubscribed) return;
+        
+        console.log('Polling profile update:', profile); // Debug log
+        
+        // If approved, show success and get complete profile data
+        if (profile.verification_status === 'approved' && isSubscribed) {
+          clearInterval(interval);
+          setIsEditing(true); // Set to editing mode immediately
+          setSuccess('Your residency has been verified! You can now complete your profile.');
+          // Play a success sound
+          const audio = new Audio('/sounds/success.mp3');
+          
+          // Get full profile data
+          try {
+            const fullProfileRes = await axiosInstance.get('/profile');
+            if (fullProfileRes.data) {
+              const fullProfile = fullProfileRes.data?.user?.profile || fullProfileRes.data?.profile || fullProfileRes.data;
+              setForm(prev => ({
+                ...prev,
+                ...fullProfile,
+                verification_status: 'approved',
+                birth_date: formatDate(fullProfile.birth_date),
+                special_categories: Array.isArray(fullProfile.special_categories) ? fullProfile.special_categories : [],
+                vaccine_received: Array.isArray(fullProfile.vaccine_received) ? fullProfile.vaccine_received : [],
+                head_of_family: !!fullProfile.head_of_family,
+                business_outside_barangay: !!fullProfile.business_outside_barangay,
+                mobile_number: fullProfile.mobile_number ?? fullProfile.contact_number ?? '',
+                current_address: fullProfile.current_address ?? fullProfile.full_address ?? '',
+                current_photo: fullProfile.current_photo || fullProfile.avatar || null,
+              }));
+            }
+          } catch (error) {
+            console.error('Error fetching full profile:', error);
+          }
+        } else {
+          // Update verification status even when not approved
+          setForm(prev => ({
+            ...prev,
+            verification_status: profile.verification_status,
+            residency_verification_image: profile.residency_verification_image
+          }));
+        }
+      } catch (error) {
+        console.error('Error polling verification status:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+    
+    return () => clearInterval(interval);
+  }, [form.verification_status]);
 
   const handleChange = (e) => {
     const { name, value, type, checked, files } = e.target;
@@ -357,6 +432,12 @@ const Profile = () => {
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center w-full py-8">
         <div className="w-full max-w-5xl mx-auto px-2 sm:px-8 lg:px-12 pb-16 flex flex-col items-center justify-center">
+          {form.verification_status === 'approved' && (
+            <ProfileCompletionIndicator
+              percentage={getProfileCompletionPercentage(form)}
+              missingFields={getMissingFields(form).map(field => fieldLabels[field])}
+            />
+          )}
           {/* Progress Steps */}
           {!hideProgressBar && (
             <div className="w-full max-w-2xl mb-6">
@@ -438,22 +519,46 @@ const Profile = () => {
           <div className="bg-white/95 shadow-xl rounded-3xl border border-gray-100 overflow-hidden mt-4 mb-10 w-full max-w-5xl mx-auto flex flex-col items-center" style={{zIndex: 20, position: 'relative'}}>
             <div className="p-6 md:p-14 flex flex-col items-center w-full">
               {/* Show only residency verification when not verified, full profile when verified */}
-              {form.verification_status !== 'approved' ? (
-                <div className="w-full">
-                  <ResidencyVerification form={form} />
-                </div>
-              ) : currentStep === 3 && showCongrats ? (
-                <ProfileCompleted />
-              ) : !isEditing ? (
-                <ReadOnlyView form={form} setIsEditing={setIsEditing} />
+              {form.verification_status === 'approved' ? (
+                // Show profile form when verified
+                <>
+                  {currentStep === 3 && showCongrats ? (
+                    <ProfileCompleted />
+                  ) : !isEditing ? (
+                    <ReadOnlyView form={form} setIsEditing={setIsEditing} />
+                  ) : (
+                    <EditableForm 
+                      form={form} 
+                      handleChange={handleChange} 
+                      handleSubmit={handleSubmit} 
+                      setIsEditing={setIsEditing}
+                      submitting={submitting}
+                    />
+                  )}
+                </>
               ) : (
-                <EditableForm 
-                  form={form} 
-                  handleChange={handleChange} 
-                  handleSubmit={handleSubmit} 
-                  setIsEditing={setIsEditing}
-                  submitting={submitting}
-                />
+                // Show verification form when not verified
+                <div className="w-full">
+                  <ResidencyVerification 
+                    form={form} 
+                    onImageUpload={() => {
+                      // Force refresh profile data when image is uploaded
+                      axiosInstance.get('/profile')
+                        .then(res => {
+                          const profile = res.data?.user?.profile || res.data?.profile || res.data;
+                          if (profile) {
+                            setForm(prev => ({
+                              ...prev,
+                              ...profile,
+                              verification_status: profile.verification_status,
+                              residency_verification_image: profile.residency_verification_image
+                            }));
+                          }
+                        })
+                        .catch(err => console.error('Error refreshing profile:', err));
+                    }}
+                  />
+                </div>
               )}
             </div>
           </div>

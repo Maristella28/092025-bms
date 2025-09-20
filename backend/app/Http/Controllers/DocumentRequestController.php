@@ -266,6 +266,7 @@ class DocumentRequestController extends Controller
     public function generatePdf(Request $request, $id)
     {
         try {
+            /** @var \App\Models\DocumentRequest $documentRequest */
             $documentRequest = DocumentRequest::with(['user', 'resident'])->findOrFail($id);
             
             if (!$documentRequest->resident) {
@@ -313,26 +314,83 @@ class DocumentRequestController extends Controller
     public function downloadPdf($id)
     {
         try {
-            $documentRequest = DocumentRequest::findOrFail($id);
-            
+            \Log::info('Starting PDF download request', [
+                'id' => $id,
+                'storage_path' => storage_path('app/public'),
+                'public_path' => public_path('storage')
+            ]);
+
+            $documentRequest = DocumentRequest::with('resident')->findOrFail($id);
+
+            \Log::info('Found document request', [
+                'document_request' => $documentRequest->toArray(),
+                'storage_exists' => Storage::disk('public')->exists(''),
+                'storage_files' => Storage::disk('public')->files()
+            ]);
+
             if (!$documentRequest->pdf_path) {
+                \Log::warning('No PDF path in document request', [
+                    'id' => $id,
+                    'document_request' => $documentRequest->toArray()
+                ]);
                 return response()->json([
-                    'message' => 'PDF certificate not found. Please generate it first.'
+                    'message' => 'PDF certificate not found. Please generate it first.',
+                    'error_code' => 'PDF_PATH_MISSING'
                 ], 404);
             }
-            
-            $pdfService = new PdfService();
-            return $pdfService->downloadCertificate($documentRequest->pdf_path);
-            
+
+            \Log::info('Checking PDF file', [
+                'pdf_path' => $documentRequest->pdf_path,
+                'full_path' => storage_path('app/public/' . $documentRequest->pdf_path),
+                'exists' => Storage::disk('public')->exists($documentRequest->pdf_path)
+            ]);
+
+            if (!Storage::disk('public')->exists($documentRequest->pdf_path)) {
+                \Log::warning('PDF file not found in storage', [
+                    'pdf_path' => $documentRequest->pdf_path,
+                    'storage_path' => storage_path('app/public'),
+                    'storage_files' => Storage::disk('public')->files()
+                ]);
+                return response()->json([
+                    'message' => 'PDF file not found on server. Please generate it first or contact admin.',
+                    'error_code' => 'PDF_FILE_MISSING'
+                ], 404);
+            }
+
+            $filePath = storage_path('app/public/' . $documentRequest->pdf_path);
+            $fileName = sprintf(
+                '%s-%s-%s.pdf',
+                str_replace(' ', '_', $documentRequest->document_type),
+                $documentRequest->resident ? str_replace(' ', '_', $documentRequest->resident->last_name) : 'Unknown',
+                date('Y-m-d')
+            );
+
+            \Log::info('Preparing PDF download', [
+                'file_path' => $filePath,
+                'file_name' => $fileName,
+                'file_exists' => file_exists($filePath),
+                'file_size' => file_exists($filePath) ? filesize($filePath) : 0
+            ]);
+
+            return response()->download($filePath, $fileName, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $fileName . '"'
+            ]);
+
         } catch (\Exception $e) {
             \Log::error('PDF Download Error', [
                 'document_request_id' => $id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'storage_path' => storage_path('app/public'),
+                'storage_exists' => Storage::disk('public')->exists(''),
+                'storage_files' => Storage::disk('public')->files()
             ]);
-            
+
             return response()->json([
                 'message' => 'Failed to download PDF certificate.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'error_code' => 'PDF_DOWNLOAD_FAILED'
             ], 500);
         }
     }

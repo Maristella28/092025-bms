@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import useResidents from '../../../../hooks/useResidents';
+import axiosInstance from '../../../../utils/axiosConfig';
 
 // Use relative URLs to leverage Vite proxy
 
@@ -31,6 +32,7 @@ const ProgramDetails = () => {
   const [program, setProgram] = useState(null);
   const [beneficiaries, setBeneficiaries] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [toast, setToast] = useState(null); // { type: 'success'|'error', message }
 
   // Form state
   const [form, setForm] = useState({
@@ -49,6 +51,130 @@ const ProgramDetails = () => {
   const [formSuccess, setFormSuccess] = useState('');
   const [formLoading, setFormLoading] = useState(false);
   const { residents, loading: residentsLoading, error: residentsError } = useResidents();
+
+    // Profile refresh with retries and proper error handling
+  const refreshProfile = async () => {
+    try {
+      // First ensure CSRF is set
+      await fetch('/sanctum/csrf-cookie', { credentials: 'include' });
+
+      // Try the main profile endpoint
+      try {
+        console.log('Attempting to refresh profile...');
+        const profileResp = await axiosInstance.get('/profile');
+        if (profileResp?.data) {
+          console.log('Profile refresh successful:', profileResp.data);
+          window.dispatchEvent(new CustomEvent('profile-updated', {
+            detail: {
+              profile: profileResp.data,
+              timestamp: new Date().toISOString()
+            }
+          }));
+          return true;
+        }
+      } catch (firstErr) {
+        console.log('Main profile endpoint failed:', firstErr);
+      }
+
+      // Try debug endpoint as fallback
+      try {
+        console.log('Attempting debug profile endpoint...');
+        const debugResp = await axiosInstance.get('/profile/debug');
+        if (debugResp?.data) {
+          console.log('Debug profile refresh successful:', debugResp.data);
+          window.dispatchEvent(new CustomEvent('profile-updated', {
+            detail: {
+              profile: debugResp.data,
+              timestamp: new Date().toISOString()
+            }
+          }));
+          return true;
+        }
+      } catch (secondErr) {
+        console.log('Debug profile endpoint failed:', secondErr);
+      }
+
+      console.warn('All profile refresh attempts failed');
+      return false;
+    } catch (err) {
+      console.warn('Profile refresh failed completely:', err);
+      return false;
+    }
+  };
+
+  // Toggle handler with toast feedback
+  const toggleMyBenefits = async (beneficiary, enabled) => {
+    const original = beneficiaries.slice();
+
+    try {
+      // Ensure CSRF token is set
+      await fetch('/sanctum/csrf-cookie', { credentials: 'include' });
+
+      console.log('Attempting to update My Benefits status:', { 
+        beneficiary_id: beneficiary.id,
+        enabled: enabled 
+      });
+
+      // Call the toggle endpoint
+      const response = await axiosInstance.post(`/beneficiaries/${beneficiary.id}/toggle-benefits`, {
+        enabled: enabled
+      });
+
+      console.log('Benefits update response:', response?.data);
+
+      // Verify the response indicates success
+      if (response?.data?.enabled !== enabled) {
+        throw new Error('Server returned unexpected enabled state');
+      }
+
+      // Update local state if successful
+      setBeneficiaries(prevBeneficiaries => 
+        prevBeneficiaries.map(b => 
+          b.id === beneficiary.id 
+            ? { ...b, my_benefits_enabled: enabled }
+            : b
+        )
+      );
+
+      // Wait a short moment for backend updates
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Try to refresh profile using available endpoint
+      try {
+        const refreshSuccess = await refreshProfile();
+        if (!refreshSuccess) {
+          console.warn('Failed to refresh profile after benefits update');
+        }
+      } catch (profileErr) {
+        console.warn('Error during profile refresh:', profileErr);
+      }
+
+      // Dispatch event for other components
+      window.dispatchEvent(new CustomEvent('profile-updated', {
+        detail: {
+          type: 'benefits-update',
+          beneficiaryId: beneficiary.id,
+          enabled: enabled,
+          timestamp: new Date().toISOString()
+        }
+      }));
+
+      setToast({
+        type: 'success',
+        message: response.data.message || 'Benefits status updated successfully'
+      });
+
+    } catch (err) {
+      console.error('Failed to update benefits status:', err);
+      setBeneficiaries(original); // Restore original state
+      setToast({
+        type: 'error',
+        message: err.response?.data?.message || 'Failed to update benefits status'
+      });
+    } finally {
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
 
   useEffect(() => {
     // First fetch CSRF cookie for Sanctum
@@ -302,6 +428,28 @@ const ProgramDetails = () => {
                     <td className="px-4 py-3 text-green-700 font-semibold">
                       ₱ {beneficiary.amount?.toLocaleString()}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      {/* Enable/Disable My Benefits buttons (admin action) */}
+                      <div className="flex gap-2 justify-end">
+                        {beneficiary.my_benefits_enabled ? (
+                          <button
+                            className="px-3 py-1 rounded-full text-sm font-semibold transition bg-red-100 text-red-700 hover:bg-red-200"
+                            onClick={() => toggleMyBenefits(beneficiary, false)}
+                            title="Disable My Benefits for this resident"
+                          >
+                            Disable
+                          </button>
+                        ) : (
+                          <button
+                            className="px-3 py-1 rounded-full text-sm font-semibold transition bg-green-100 text-green-700 hover:bg-green-200"
+                            onClick={() => toggleMyBenefits(beneficiary, true)}
+                            title="Enable My Benefits for this resident"
+                          >
+                            Enable
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -542,6 +690,13 @@ const ProgramDetails = () => {
                 </form>
               </div>
             </div>
+          </div>
+        )}
+        {/* Toast */}
+        {toast && (
+          <div className={`fixed right-6 bottom-6 z-50 p-4 rounded-lg shadow-lg ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            <div className="font-semibold">{toast.type === 'success' ? 'Success' : 'Error'}</div>
+            <div className="text-sm">{toast.message}</div>
           </div>
         )}
   </main>

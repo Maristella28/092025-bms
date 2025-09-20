@@ -80,7 +80,11 @@ class ResidentProfileController extends Controller
                 }
             }
             
-            $resident = \App\Models\Resident::where('user_id', $user->id)->with('profile')->first();
+            $resident = \App\Models\Resident::where('user_id', $user->id)
+                ->with('profile')
+                ->orderByRaw("CASE WHEN verification_status = 'approved' THEN 0 ELSE 1 END")
+                ->orderByDesc('updated_at')
+                ->first();
             
             if (!$resident) {
                 // Fallback: return Profile model data if Resident doesn't exist yet
@@ -128,12 +132,32 @@ class ResidentProfileController extends Controller
             
             // Ensure the resident ID is correctly set (not overwritten by profile ID)
             $profileData['id'] = $residentId;
-            $profileData['resident_id'] = $residentId;
+            // Keep the public resident_id string stable for frontend usage
+            $profileData['resident_id'] = $resident->resident_id;
             
             // Ensure avatar field is properly mapped for frontend
             if (!isset($profileData['avatar']) && isset($profileData['current_photo'])) {
                 $profileData['avatar'] = $profileData['current_photo'];
             }
+            
+            // Ensure verification_status prefers resident-level status when available
+            $profileData['verification_status'] = $resident->verification_status
+                ?? ($resident->profile ? $resident->profile->verification_status : ($profileData['verification_status'] ?? null));
+
+            // Normalize permissions and flags so frontend has consistent shape
+            if (!array_key_exists('permissions', $profileData)) {
+                $profileData['permissions'] = $resident->profile && isset($resident->profile->permissions) ? $resident->profile->permissions : [];
+            }
+            if (!array_key_exists('my_benefits_enabled', $profileData)) {
+                $profileData['my_benefits_enabled'] = $resident->profile && isset($resident->profile->my_benefits_enabled) ? (bool)$resident->profile->my_benefits_enabled : false;
+            }
+
+            \Log::info('Verification status resolution', [
+                'user_id' => $user->id,
+                'resident_verification_status' => $resident->verification_status ?? null,
+                'profile_verification_status' => $resident->profile ? $resident->profile->verification_status : null,
+                'final_verification_status' => $profileData['verification_status'] ?? null,
+            ]);
             
             // DEBUG: Log the response structure
             \Log::info('Profile show response structure', [
@@ -768,54 +792,117 @@ class ResidentProfileController extends Controller
     public function approveVerification($id)
     {
         try {
-            // Accept either resident id OR profile id for flexibility
-            $resident = Resident::find($id);
-            if (!$resident) {
-                $resident = Resident::where('profile_id', $id)->first();
+            \DB::beginTransaction();
+            
+            // First try to find by profile ID
+            $profile = Profile::find($id);
+            $resident = null;
+            
+            if ($profile) {
+                // Update profile verification status
+                $profile->verification_status = 'approved';
+                $profile->denial_reason = null;
+                $profile->save();
+                
+                // Find resident record
+                $resident = Resident::where('profile_id', $profile->id)
+                    ->orWhere('id', $id)
+                    ->first();
+                
+                // If resident doesn't exist, create one
+                if (!$resident) {
+                    $resident = new Resident();
+                    $resident->user_id = $profile->user_id;
+                    $resident->profile_id = $profile->id;
+                    $resident->resident_id = $profile->resident_id;
+                }
+                
+                // Update resident verification status
+                $resident->verification_status = 'approved';
+                $resident->save();
+                
+                // Force refresh relations
+                $profile = $profile->fresh();
+                $resident = $resident->fresh();
+                
+                // Notify the user
+                if ($profile->user) {
+                    $profile->user->notify(new ResidencyVerificationApproved($profile->user));
+                }
+                
+                \DB::commit();
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Residency verification approved successfully.',
+                    'profile' => $profile,
+                    'resident' => $resident
+                ], 200);
             }
             
-            if (!$resident) {
-                // Fallback: update Profile verification if Resident does not yet exist
-                $profile = Profile::find($id);
-                if ($profile) {
-                    $profile->verification_status = 'approved';
-                    $profile->denial_reason = null;
-                    $profile->save();
-                    // Notify the user if possible
-                    if ($profile->user) {
-                        $profile->user->notify(new ResidencyVerificationApproved($profile->user));
+            // If no profile found, try to find resident directly
+            $resident = Resident::with('profile')->find($id);
+            if ($resident) {
+                \DB::beginTransaction();
+                try {
+                    // Update resident
+                    $resident->verification_status = 'approved';
+                    $resident->save();
+                    
+                    // Update or create profile
+                    if ($resident->profile) {
+                        $resident->profile->verification_status = 'approved';
+                        $resident->profile->denial_reason = null;
+                        $resident->profile->save();
+                    } else if ($resident->user_id) {
+                        $profile = new Profile();
+                        $profile->user_id = $resident->user_id;
+                        $profile->verification_status = 'approved';
+                        $profile->resident_id = $resident->resident_id;
+                        $profile->save();
+                        
+                        $resident->profile_id = $profile->id;
+                        $resident->save();
                     }
+                    
+                    // Force refresh the resident with profile relation
+                    $resident = $resident->fresh('profile');
+                    
+                    // Notify the user
+                    if ($resident->user) {
+                        $resident->user->notify(new ResidencyVerificationApproved($resident->user));
+                    }
+                    
+                    \DB::commit();
+                    
                     return response()->json([
-                        'message' => 'Residency verification approved successfully (profile-level).',
-                        'profile' => $profile
+                        'success' => true,
+                        'message' => 'Residency verification approved successfully.',
+                        'resident' => $resident,
+                        'profile' => $resident->profile
                     ], 200);
-                }
-                return response()->json(['message' => 'Resident not found.'], 404);
-            }
-            // Update verification status
-            $resident->verification_status = 'approved';
-            $resident->save();
-            // Keep profile in sync if it exists
-            if ($resident->profile) {
-                $resident->profile->verification_status = 'approved';
-                $resident->profile->denial_reason = null;
-                $resident->profile->save();
-                // Notify the user
-                if ($resident->user) {
-                    $resident->user->notify(new ResidencyVerificationApproved($resident->user));
+                } catch (\Exception $e) {
+                    \DB::rollBack();
+                    throw $e;
                 }
             }
+            
             return response()->json([
-                'message' => 'Residency verification approved successfully.',
-                'resident' => $resident
-            ], 200);
+                'success' => false,
+                'message' => 'No resident or profile found with the provided ID.'
+            ], 404);
         } catch (\Exception $e) {
+            if (\DB::transactionLevel() > 0) {
+                \DB::rollBack();
+            }
+            
             \Log::error('Residency verification approval failed', [
                 'resident_id' => $id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
             return response()->json([
+                'success' => false,
                 'message' => 'Failed to approve residency verification.',
                 'error' => $e->getMessage()
             ], 500);

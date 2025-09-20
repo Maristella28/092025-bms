@@ -9,6 +9,23 @@ use Illuminate\Support\Facades\Storage;
 class BeneficiaryController extends Controller
 {
     /**
+     * Get enabled beneficiaries for the My Benefits section
+     */
+    public function getMyBenefits(Request $request)
+    {
+        $query = Beneficiary::with(['program'])
+            ->where('my_benefits_enabled', true)
+            ->where('status', 'Approved');
+
+        // If resident_id is provided, filter by it
+        if ($request->has('resident_id')) {
+            $query->where('resident_id', $request->resident_id);
+        }
+
+        return response()->json($query->orderByDesc('id')->get());
+    }
+
+    /**
      * Display a listing of the resource.
      */
     public function index(Request $request)
@@ -124,6 +141,7 @@ class BeneficiaryController extends Controller
             'approved_date' => 'nullable|date',
             'remarks' => 'nullable|string',
             'attachment' => 'nullable|file',
+            'my_benefits_enabled' => 'boolean',
         ]);
         if ($request->hasFile('attachment')) {
             if ($beneficiary->attachment) {
@@ -139,6 +157,37 @@ class BeneficiaryController extends Controller
     /**
      * Remove the specified resource from storage.
      */
+    /**
+     * Toggle My Benefits status for a beneficiary
+     */
+    public function toggleMyBenefits(Request $request, $id)
+    {
+        $beneficiary = Beneficiary::findOrFail($id);
+        
+        // Validate the request
+        $data = $request->validate([
+            'enabled' => 'required|boolean',
+        ]);
+
+        // Only allow enabling if the beneficiary is approved
+        if ($data['enabled'] && $beneficiary->status !== 'Approved') {
+            return response()->json([
+                'message' => 'Only approved beneficiaries can be enabled for My Benefits',
+                'enabled' => false
+            ], 422);
+        }
+
+        // Update the beneficiary
+        $beneficiary->my_benefits_enabled = $data['enabled'];
+        $beneficiary->save();
+
+        // Return the updated status
+        return response()->json([
+            'message' => 'My Benefits status updated successfully',
+            'enabled' => $beneficiary->my_benefits_enabled
+        ]);
+    }
+
     public function destroy($id)
     {
         $beneficiary = Beneficiary::findOrFail($id);

@@ -296,13 +296,14 @@ class AssetRequestController extends Controller
     public function getStatusCounts()
     {
         $user = Auth::user();
-        
+        \Log::info('getStatusCounts called', ['user' => $user]);
+
         if ($user->role === 'admin') {
             $query = AssetRequest::query();
         } else {
             $query = AssetRequest::where('user_id', $user->id);
         }
-        
+
         $counts = [
             'approved' => (clone $query)->where('status', 'approved')->count(),
             'pending' => (clone $query)->where('status', 'pending')->count(),
@@ -310,7 +311,8 @@ class AssetRequestController extends Controller
             'paid' => (clone $query)->where('payment_status', 'paid')->count(),
             'total' => $query->count(),
         ];
-        
+
+        \Log::info('Status counts:', $counts);
         return response()->json($counts);
     }
 }

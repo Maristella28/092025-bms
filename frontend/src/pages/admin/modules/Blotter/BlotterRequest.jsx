@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from '../../../../utils/axiosConfig';
+import axiosInstance from '../../../../utils/axiosConfig';
 import { useNavigate } from 'react-router-dom';
 import TimePicker from 'react-time-picker';
 import 'react-time-picker/dist/TimePicker.css';
@@ -19,7 +19,7 @@ const BlotterRequest = () => {
   // Fetch all blotter requests for admin
   const fetchRequests = () => {
     setLoading(true);
-    axios.get('/admin/blotter-requests')
+    axiosInstance.get('/admin/blotter-requests')
       .then(res => setRequests(res.data))
       .catch(err => {
         if (err.response && err.response.status === 403) {
@@ -42,9 +42,9 @@ const BlotterRequest = () => {
     setActionLoading(prev => ({ ...prev, [id]: true }));
     try {
       if (status === 'approved') {
-        await axios.patch(`/blotter-requests/${id}`, { status, approved_date: date });
+  await axiosInstance.patch(`/blotter-requests/${id}`, { status, approved_date: date });
       } else {
-        await axios.patch(`/blotter-requests/${id}`, { status });
+  await axiosInstance.patch(`/blotter-requests/${id}`, { status });
       }
       fetchRequests();
     } catch (e) {

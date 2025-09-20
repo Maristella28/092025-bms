@@ -58,9 +58,9 @@
         if (selected) {
             setForm(f => ({
                 ...f,
-                resident_id: selected.id,
+                resident_id: selected.resident_id, // Use the resident_id field
                 complainant_name: `${selected.first_name} ${selected.middle_name ? selected.middle_name + ' ' : ''}${selected.last_name}${selected.name_suffix && selected.name_suffix.toLowerCase() !== 'none' ? ' ' + selected.name_suffix : ''}`.trim(),
-                contact_number: selected.contact_number || '',
+                contact_number: selected.mobile_number || selected.contact_number || '', // Check both fields
                 email: selected.email || '',
             }));
         }

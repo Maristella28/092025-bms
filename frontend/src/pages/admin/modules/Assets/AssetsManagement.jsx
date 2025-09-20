@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from '../../../../utils/axiosConfig';
+import axiosInstance from '../../../../utils/axiosConfig';
 import Navbar from "../../../../components/Navbar";
 import Sidebar from "../../../../components/Sidebar";
 import { useNavigate } from 'react-router-dom';
@@ -108,7 +108,7 @@ const AssetsManagement = () => {
 
   const fetchAssets = () => {
     setLoading(true);
-    axios.get('/assets')
+    axiosInstance.get('/assets')
       .then(res => setAssets(res.data))
       .catch(() => alert('Failed to load assets'))
       .finally(() => setLoading(false));
@@ -140,7 +140,7 @@ const AssetsManagement = () => {
       formData.append('available_dates', JSON.stringify(form.available_dates));
       if (form.image) formData.append('image', form.image);
 
-      const res = await axios.post('/assets', formData, {
+      const res = await axiosInstance.post('/assets', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setAssets([...assets, res.data]);
@@ -179,7 +179,7 @@ const AssetsManagement = () => {
       formData.append('available_dates', JSON.stringify(form.available_dates));
       if (form.image) formData.append('image', form.image);
 
-      const res = await axios.patch(`/assets/${editingId}`, formData, {
+        const res = await axiosInstance.patch(`/assets/${editingId}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setAssets(assets.map(a => a.id === editingId ? res.data : a));
@@ -194,7 +194,7 @@ const AssetsManagement = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this asset?')) return;
     try {
-      await axios.delete(`/assets/${id}`);
+  await axiosInstance.delete(`/assets/${id}`);
       setAssets(assets.filter(a => a.id !== id));
       alert('Asset deleted!');
     } catch (err) {

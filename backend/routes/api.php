@@ -1,4 +1,3 @@
-
 <?php
 
 use Illuminate\Http\Request;
@@ -20,6 +19,7 @@ use App\Http\Controllers\FinancialRecordController;
 use App\Http\Controllers\DocumentRequestController;
 use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\ResidencyStatusController;
+use App\Http\Controllers\BeneficiaryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -175,6 +175,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         // 👥 Residents list
         Route::get('/residents', [ResidentProfileController::class, 'index']);
         Route::get('/admin/residents', [ResidentController::class, 'index']);
+        Route::get('/residents-deleted', [ResidentController::class, 'trashed']); // Get soft deleted residents
         
         // 📊 Reporting Module - MUST come before {id} routes to avoid conflicts
         Route::get('/residents/report', [ResidentController::class, 'report']);
@@ -182,6 +183,7 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         
         Route::get('/residents/{id}', [ResidentProfileController::class, 'showById']);
         Route::put('/residents/{id}', [ResidentController::class, 'update']); // Admin update
+        Route::post('/residents/{id}/delete', [ResidentController::class, 'destroy']); // Admin soft delete
         
         // 🏠 Residency Verification
         Route::post('/residents/{id}/approve-verification', [ResidentProfileController::class, 'approveVerification']);
@@ -228,11 +230,23 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
         Route::get('/activity-logs/{id}', [ActivityLogController::class, 'show']);
         Route::get('/activity-logs/statistics/summary', [ActivityLogController::class, 'statistics']);
         Route::get('/activity-logs/filters/options', [ActivityLogController::class, 'filters']);
+        Route::get('/activity-logs/security/alerts', [ActivityLogController::class, 'securityAlerts']);
+        Route::get('/activity-logs/audit/summary', [ActivityLogController::class, 'auditSummary']);
         Route::post('/activity-logs/export', [ActivityLogController::class, 'export']);
         Route::delete('/activity-logs/cleanup', [ActivityLogController::class, 'cleanup']);
 
         // Residency Status update by admin
         Route::post('/residency-status/{userId}', [ResidencyStatusController::class, 'updateStatus']);
+
+        // Toggle My Benefits permission for a resident (admin only)
+        Route::post('/residents/{id}/toggle-my-benefits', [\App\Http\Controllers\ResidentBenefitsController::class, 'toggle']);
+
+    // 🏠 Household management
+    Route::get('/households', [\App\Http\Controllers\HouseholdController::class, 'index']);
+    Route::post('/households', [\App\Http\Controllers\HouseholdController::class, 'store']);
+    Route::get('/households/{id}', [\App\Http\Controllers\HouseholdController::class, 'show']);
+    Route::put('/households/{id}', [\App\Http\Controllers\HouseholdController::class, 'update']);
+    Route::delete('/households/{id}', [\App\Http\Controllers\HouseholdController::class, 'destroy']);
     });
     /*
     |--------------------------------------------------------------------------
@@ -260,8 +274,31 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     Route::get('/residents/my-profile', [ResidentController::class, 'myProfile']);
 
     // 🧾 Authenticated users (incl. admin): Read residents
-    Route::get('/residents', [ResidentProfileController::class, 'index']);
-    Route::get('/residents/{id}', [ResidentProfileController::class, 'showById']);
+    // Apply profile.complete middleware to protect resident-facing modules for incomplete profiles
+    Route::middleware('profile.complete')->group(function () {
+        Route::get('/residents', [ResidentProfileController::class, 'index']);
+        Route::get('/residents/{id}', [ResidentProfileController::class, 'showById']);
+
+        // Document Requests (resident-facing)
+        Route::get('/document-requests', [App\Http\Controllers\DocumentRequestController::class, 'index']);
+        Route::post('/document-requests', [App\Http\Controllers\DocumentRequestController::class, 'store']);
+        Route::get('/document-requests/my', [App\Http\Controllers\DocumentRequestController::class, 'myRequests']);
+
+        // Projects reactions and viewing
+        Route::post('/projects/{projectId}/react', [App\Http\Controllers\ProjectReactionController::class, 'react']);
+        Route::get('/projects/{projectId}/reactions', [App\Http\Controllers\ProjectReactionController::class, 'index']);
+
+        // Blotter Requests (resident submit)
+        Route::post('/blotter-requests', [BlotterRequestController::class, 'store']);
+        
+        // My Benefits API (returns placeholder data) - access controlled by mybenefits.allowed
+        Route::middleware('mybenefits.allowed')->get('/my-benefits', function() {
+            return response()->json([
+                'message' => 'My Benefits placeholder',
+                'data' => []
+            ]);
+        });
+    });
 
     // 🔔 Notifications
     Route::get('/notifications', function (Request $request) {
@@ -284,12 +321,13 @@ Route::middleware(['auth:sanctum', 'throttle:200,1'])->group(function () {
     Route::post('/assets/request', [AssetRequestController::class, 'store'])
         ->middleware('throttle:100,1'); // 100 requests per minute for dev
     Route::get('/asset-requests', [AssetRequestController::class, 'index']);
-    Route::patch('/asset-requests/{id}', [AssetRequestController::class, 'update']); // admin
-    Route::post('/asset-requests/{id}/pay', [AssetRequestController::class, 'processPayment']); // Process payment
-    Route::delete('/asset-requests/{id}', [AssetRequestController::class, 'destroy']);
-    Route::get('/asset-requests/{id}', [AssetRequestController::class, 'show']);
-    Route::post('/asset-requests/generate-receipt', [AssetRequestController::class, 'generateReceipt']); // Generate PDF receipt
+    // Place static routes before dynamic to avoid conflicts
     Route::get('/asset-requests/status-counts', [AssetRequestController::class, 'getStatusCounts']); // Get status counts
+    Route::post('/asset-requests/generate-receipt', [AssetRequestController::class, 'generateReceipt']); // Generate PDF receipt
+    Route::patch('/asset-requests/{id}', [AssetRequestController::class, 'update'])->whereNumber('id'); // admin
+    Route::post('/asset-requests/{id}/pay', [AssetRequestController::class, 'processPayment'])->whereNumber('id'); // Process payment
+    Route::delete('/asset-requests/{id}', [AssetRequestController::class, 'destroy'])->whereNumber('id');
+    Route::get('/asset-requests/{id}', [AssetRequestController::class, 'show'])->whereNumber('id');
 
     // Blotter Requests
     Route::post('/blotter-requests', [BlotterRequestController::class, 'store']);
@@ -439,6 +477,8 @@ Route::get('/feedbacks', [App\Http\Controllers\FeedbackController::class, 'index
 
 
 Route::apiResource('beneficiaries', App\Http\Controllers\BeneficiaryController::class);
+Route::post('/beneficiaries/{id}/toggle-benefits', [App\Http\Controllers\BeneficiaryController::class, 'toggleMyBenefits']);
+Route::get('/my-benefits', [BeneficiaryController::class, 'getMyBenefits']);
 Route::apiResource('disaster-emergencies', DisasterEmergencyRecordController::class);
 Route::apiResource('financial-records', FinancialRecordController::class);
 

@@ -8,6 +8,29 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
+/**
+ * User Model
+ *
+ * @property int $id
+ * @property string $name
+ * @property string $email
+ * @property string $role
+ * @property bool $has_logged_in
+ * @property string $verification_code
+ * @property \Carbon\Carbon $verification_code_expires_at
+ * @property \Carbon\Carbon $email_verified_at
+ * @property bool $privacy_policy_accepted
+ * @property \Carbon\Carbon $privacy_policy_accepted_at
+ * @property string $residency_status
+ * @property \Carbon\Carbon $last_activity_at
+ * @property \Carbon\Carbon $status_updated_at
+ * @property string $status_notes
+ * @property int $status_updated_by
+ * @property-read \App\Models\Profile $profile
+ * @property-read \App\Models\Resident $resident
+ * @property-read \App\Models\User $statusUpdatedBy
+ * @property-read \Illuminate\Database\Eloquent\Collection $notifications
+ */
 class User extends Authenticatable implements MustVerifyEmail
 {
     use HasApiTokens, HasFactory, Notifiable;

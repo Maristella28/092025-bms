@@ -59,14 +59,14 @@ class DatabaseSeeder extends Seeder
         );
 
         // Mark admin email as verified
-        $user = \App\Models\User::where('email', 'admin@barangay.com')->first();
+        $user = User::where('email', 'admin@barangay.com')->first();
         if ($user) {
             $user->email_verified_at = now();
             $user->save();
         }
 
         // Trigger email verification for a specific user
-        $user = \App\Models\User::where('email', 'put_the_email_here')->first();
+        $user = User::where('email', 'put_the_email_here')->first();
         if ($user) {
             $user->sendEmailVerificationNotification();
         }

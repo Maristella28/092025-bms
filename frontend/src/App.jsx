@@ -10,7 +10,7 @@ import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import Profile from "./pages/forms/Profile";
-import ResidencyVerification from "./pages/ResidencyVerification";
+import ResidencyVerification from "./pages/forms/ResidencyVerification";
 import ResidencyDenied from "./pages/residents/ResidencyDenied";
 
 import AdminLayout from "./AdminLayout";
@@ -19,6 +19,7 @@ import StaffLayout from "./layout/StaffLayout";
 import TreasurerLayout from "./layout/TreasurerLayout";
 
 import * as AdminPages from './pages/admin';
+import CreateHousehold from './pages/admin/modules/Household/CreateHousehold';
 import AdminEditProfile from './pages/admin/AdminEditProfile';
 import * as ResidentPages from './pages/residents';
 import RequestAssets from './pages/residents/modules/Assets/RequestAssets';
@@ -126,6 +127,8 @@ function App() {
           <Route path="social-services/program/:id" element={<ProgramDetails />} />
           {/* Edit Profile Route */}
           <Route path="edit-profile" element={<AdminEditProfile />} />
+          {/* Create Household Route */}
+          <Route path="create-household" element={<CreateHousehold />} />
         </Route>
         <Route
           path="/admin/assets-management"

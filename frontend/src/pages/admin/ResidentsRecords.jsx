@@ -1,9 +1,10 @@
-  import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import Navbar from "../../components/Navbar";
 import Sidebar from "../../components/Sidebar";
 import HeaderControls from "./components/HeaderControls";
 import ResidentsTable from "./components/ResidentsTable";
 import axiosInstance from "../../utils/axiosConfig";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import {
   PlusIcon,
   MagnifyingGlassIcon,
@@ -11,6 +12,7 @@ import {
   UserIcon,
   XMarkIcon,
   EyeIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   FunnelIcon,
@@ -39,15 +41,178 @@ import {
   ChartBarIcon
 } from "@heroicons/react/24/solid";
 
-// BADGE FUNCTION (restored)
-const badge = (text, color, icon = null) => (
+// Utility Components
+const Badge = ({ text, color, icon = null }) => (
   <span className={`px-3 py-1.5 text-xs font-semibold rounded-full ${color} inline-flex items-center gap-1 shadow-sm transition-all duration-200 hover:shadow-md`}>
     {icon && icon}
     {text}
   </span>
 );
 
-// AVATAR COMPONENT (use this everywhere for avatars)
+// Working export functions - CSV and PDF (print-to-PDF)
+function exportToCSV(data) {
+  try {
+    const items = Array.isArray(data) ? data : [];
+    if (items.length === 0) {
+      if (window.__showInfo) window.__showInfo('No data to export.', 'Export', 'info'); else alert('No data to export.');
+      return;
+    }
+
+    const toName = (r) => {
+      const first = r.first_name || '';
+      const middle = r.middle_name ? ` ${r.middle_name}` : '';
+      const last = r.last_name ? ` ${r.last_name}` : '';
+      const suffix = r.name_suffix && r.name_suffix.toLowerCase() !== 'none' ? ` ${r.name_suffix}` : '';
+      return `${first}${middle}${last}${suffix}`.trim();
+    };
+
+    const computeStatus = (r) => {
+      if (r.update_status) return r.update_status;
+      const dateStr = r.last_modified || r.updated_at;
+      if (!dateStr) return 'Needs Verification';
+      const updatedDate = new Date(dateStr);
+      if (isNaN(updatedDate)) return 'Needs Verification';
+      const now = new Date();
+      const monthsDiff = (now.getFullYear() - updatedDate.getFullYear()) * 12 + (now.getMonth() - updatedDate.getMonth());
+      if (monthsDiff <= 6) return 'Active';
+      if (monthsDiff <= 12) return 'Outdated';
+      return 'Needs Verification';
+    };
+
+    const escapeCSV = (val) => {
+      const s = val == null ? '' : String(val);
+      if (/[",\n\r]/.test(s)) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+
+    const headers = ['Resident ID', 'Name', 'Update Status', 'Verification', 'Last Modified', 'For Review'];
+    const rows = items.map((r) => [
+      r.resident_id ?? r.id ?? '',
+      toName(r),
+      computeStatus(r),
+      r.verification_status || 'Pending',
+      r.last_modified ? new Date(r.last_modified).toLocaleString() : (r.updated_at ? new Date(r.updated_at).toLocaleString() : ''),
+      r.for_review ? 'Yes' : 'No',
+    ]);
+
+    const csv = [headers, ...rows].map((row) => row.map(escapeCSV).join(',')).join('\r\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'residents.csv';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('CSV export error:', e);
+    if (window.__showInfo) window.__showInfo('Failed to export CSV.', 'Export Error', 'error'); else alert('Failed to export CSV.');
+  }
+}
+
+function exportToPDF(data) {
+  try {
+    const items = Array.isArray(data) ? data : [];
+    if (items.length === 0) {
+      if (window.__showInfo) window.__showInfo('No data to export.', 'Export', 'info'); else alert('No data to export.');
+      return;
+    }
+
+    const toName = (r) => {
+      const first = r.first_name || '';
+      const middle = r.middle_name ? ` ${r.middle_name}` : '';
+      const last = r.last_name ? ` ${r.last_name}` : '';
+      const suffix = r.name_suffix && r.name_suffix.toLowerCase() !== 'none' ? ` ${r.name_suffix}` : '';
+      return `${first}${middle}${last}${suffix}`.trim();
+    };
+
+    const computeStatus = (r) => {
+      if (r.update_status) return r.update_status;
+      const dateStr = r.last_modified || r.updated_at;
+      if (!dateStr) return 'Needs Verification';
+      const updatedDate = new Date(dateStr);
+      if (isNaN(updatedDate)) return 'Needs Verification';
+      const now = new Date();
+      const monthsDiff = (now.getFullYear() - updatedDate.getFullYear()) * 12 + (now.getMonth() - updatedDate.getMonth());
+      if (monthsDiff <= 6) return 'Active';
+      if (monthsDiff <= 12) return 'Outdated';
+      return 'Needs Verification';
+    };
+
+    const rowsHtml = items.map((r) => `
+      <tr>
+        <td>${r.resident_id ?? r.id ?? ''}</td>
+        <td>${toName(r)}</td>
+        <td>${computeStatus(r)}</td>
+        <td>${r.verification_status || 'Pending'}</td>
+        <td>${r.last_modified ? new Date(r.last_modified).toLocaleString() : (r.updated_at ? new Date(r.updated_at).toLocaleString() : '')}</td>
+        <td>${r.for_review ? 'Yes' : 'No'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Residents Report</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 24px; }
+  h1 { font-size: 18px; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  th { background: #f5f5f5; }
+  @media print {
+    @page { size: A4 landscape; margin: 12mm; }
+  }
+</style>
+</head>
+<body>
+  <h1>Residents Report</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Resident ID</th>
+        <th>Name</th>
+        <th>Update Status</th>
+        <th>Verification</th>
+        <th>Last Modified</th>
+        <th>For Review</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+  <script>
+    window.onload = function() {
+      window.print();
+      setTimeout(function() { window.close(); }, 300);
+    };
+  </script>
+</body>
+</html>
+`;
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      if (window.__showInfo) window.__showInfo('Popup was blocked. Please allow popups to export to PDF.', 'Export PDF', 'error'); else alert('Popup was blocked. Please allow popups to export to PDF.');
+      return;
+    }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (e) {
+    console.error('PDF export error:', e);
+    if (window.__showInfo) window.__showInfo('Failed to export PDF.', 'Export Error', 'error'); else alert('Failed to export PDF.');
+  }
+}
+
+
 const AvatarImg = ({ avatarPath }) => {
   const getAvatarUrl = (path) =>
     path && typeof path === 'string' && path.trim() !== '' && path.trim().toLowerCase() !== 'avatar' && path.trim().toLowerCase() !== 'avatars/'
@@ -72,13 +237,30 @@ const AvatarImg = ({ avatarPath }) => {
 };
 // Main component wrapper
 const ResidentsRecords = () => {
-  // Core state
+  console.log('ResidentsRecords component mounting');
+
+
+  // Core state for residents
   const [residents, setResidents] = useState([]);
   const [filteredResidents, setFilteredResidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
+  // Analytics and reporting state
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [reportFilters, setReportFilters] = useState({
+    update_status: '',
+    verification_status: '',
+    year: '',
+    month: '',
+    sort_by: 'last_modified',
+    sort_order: 'desc'
+  });
+  const [reportData, setReportData] = useState([]);
+  const [fetchingReports, setFetchingReports] = useState(false);
+
+  // User management state
   const [residentsUsers, setResidentsUsers] = useState([]);
   const [residentsUsersLoading, setResidentsUsersLoading] = useState(false);
   const [recentlyDeletedResidents, setRecentlyDeletedResidents] = useState([]);
@@ -86,6 +268,7 @@ const ResidentsRecords = () => {
   const [showResidentsUsers, setShowResidentsUsers] = useState(false);
   const [showRecentlyDeleted, setShowRecentlyDeleted] = useState(false);
 
+  // Modal and form state
   const [selectedResident, setSelectedResident] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [editData, setEditData] = useState({});
@@ -94,14 +277,86 @@ const ResidentsRecords = () => {
   const [usersWithoutProfiles, setUsersWithoutProfiles] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
 
+  // Verification state
   const [comment, setComment] = useState('');
   const [currentResidentId, setCurrentResidentId] = useState(null);
   const [showCommentModal, setShowCommentModal] = useState(false);
+  // Generic info modal state (replaces window.alert)
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [infoModal, setInfoModal] = useState({ title: '', message: '', type: 'info' });
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
-  const [reportFilters, setReportFilters] = useState({ update_status: '', verification_status: '', sort_by: 'last_modified', sort_order: 'desc' });
-  const [reportData, setReportData] = useState([]);
-  const [fetchingReports, setFetchingReports] = useState(false);
+  const showInfo = (message, title = 'Notice', type = 'info') => {
+    setInfoModal({ title, message: typeof message === 'string' ? message : JSON.stringify(message), type });
+    setShowInfoModal(true);
+  };
 
+  const closeInfo = () => setShowInfoModal(false);
+
+  const openConfirm = (residentId) => {
+    setPendingDeleteId(residentId);
+    setShowConfirmModal(true);
+  };
+
+  const closeConfirm = () => {
+    setPendingDeleteId(null);
+    setShowConfirmModal(false);
+  };
+
+  // Expose showInfo globally so module-level helpers (exportToCSV/PDF) can call it when component is mounted
+  useEffect(() => {
+    window.__showInfo = showInfo;
+    return () => { delete window.__showInfo; };
+  }, []);
+  
+  // Verification handling
+  const handleVerification = async (residentId, status) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/residents/${residentId}/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ 
+          status,
+          comment: comment || undefined
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update verification status');
+      }
+
+      const result = await response.json();
+      
+      // Update the resident in the local state
+      setResidents(prevResidents => 
+        prevResidents.map(resident => 
+          resident.id === residentId 
+            ? { ...resident, verification_status: status }
+            : resident
+        )
+      );
+
+      // Show success message
+      toast.success(result.message || 'Verification status updated successfully');
+      
+      // Close any open modals
+      setShowCommentModal(false);
+      setComment('');
+      
+      // Refresh the residents list to get updated data
+      fetchResidents();
+      
+    } catch (error) {
+      console.error('Error updating verification status:', error);
+      toast.error('Failed to update verification status');
+    }
+  };
+
+  // Image modal state
   const [selectedImage, setSelectedImage] = useState(null);
   const [showImageModal, setShowImageModal] = useState(false);
 
@@ -122,8 +377,16 @@ const ResidentsRecords = () => {
     setFilteredResidents(list);
   }, [residents, search, statusFilter]);
 
+
+
   const handleFilterChange = (key, value) => {
-    setReportFilters((prev) => ({ ...prev, [key]: value }));
+    setReportFilters((prev) => {
+      const newFilters = { ...prev, [key]: value };
+      if (key === 'year') {
+        newFilters.month = '';
+      }
+      return newFilters;
+    });
   };
 
   const fetchReports = async () => {
@@ -144,91 +407,154 @@ const ResidentsRecords = () => {
   // Toggle for showing/hiding report filters UI
   const [showReportFilters, setShowReportFilters] = useState(false);
 
-  // --- Analytics Breakdown (Grouped & Formal) ---
-  const genderStats = {
-    male: residents.filter(r => r.sex?.toLowerCase() === 'male').length,
-    female: residents.filter(r => r.sex?.toLowerCase() === 'female').length,
-    other: residents.filter(r => r.sex && !['male','female'].includes(r.sex.toLowerCase())).length,
+  // Analytics state
+  const [chartData, setChartData] = useState([]);
+  const [selectedChartType, setSelectedChartType] = useState('registrations');
+  const [selectedCategory, setSelectedCategory] = useState('gender');
+  // Analytics filters for Registration Analytics
+  const [selectedAnalyticsYear, setSelectedAnalyticsYear] = useState('');
+  const [selectedAnalyticsMonth, setSelectedAnalyticsMonth] = useState(0); // 0 means no month selected
+
+  // Verify resident user's residency
+  const handleVerifyUser = async (profileId, userId) => {
+    try {
+      // First, approve the profile verification
+      const response = await fetch(`http://localhost:8000/api/residents/verify/${profileId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          status: 'approved',
+          notify: true // Enable notification to the resident
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to verify residency');
+      }
+
+      const result = await response.json();
+      
+      // Update both the profile and resident verification status
+      const profileResponse = await fetch(`http://localhost:8000/api/profiles/${profileId}/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          verification_status: 'approved',
+          profileId: profileId,
+          userId: userId
+        })
+      });
+
+      if (!profileResponse.ok) {
+        throw new Error('Failed to update profile status');
+      }
+
+      toast.success('Residency verification approved successfully. Resident can now complete their profile.');
+      
+      // Refresh both residents and users data
+      await fetchResidentsUsers();
+      await fetchResidents();
+
+    } catch (error) {
+      console.error('Error verifying residency:', error);
+      toast.error('Failed to verify residency: ' + error.message);
+    }
   };
 
-  const civilStatusStats = {
-    single: residents.filter(r => r.civil_status?.toLowerCase() === 'single').length,
-    married: residents.filter(r => r.civil_status?.toLowerCase() === 'married').length,
-    widowed: residents.filter(r => r.civil_status?.toLowerCase() === 'widowed').length,
-    divorced: residents.filter(r => r.civil_status?.toLowerCase() === 'divorced').length,
-    separated: residents.filter(r => r.civil_status?.toLowerCase() === 'separated').length,
-  };
-
-  const ageGroupStats = {
-    children: residents.filter(r => r.age < 13).length,
-    teens: residents.filter(r => r.age >= 13 && r.age < 20).length,
-    adults: residents.filter(r => r.age >= 20 && r.age < 60).length,
-    seniors: residents.filter(r => r.age >= 60).length,
-  };
-
-  const voterStatusStats = {
-    registered: residents.filter(r => r.voter_status?.toLowerCase() === 'registered').length,
-    unregistered: residents.filter(r => r.voter_status?.toLowerCase() === 'unregistered').length,
-    active: residents.filter(r => r.voter_status?.toLowerCase() === 'active').length,
-    inactive: residents.filter(r => r.voter_status?.toLowerCase() === 'inactive').length,
-  };
+  // Analytics computed data - memoized for performance
+  const analyticsData = useMemo(() => ({
+    gender: {
+      male: residents.filter(r => r.sex?.toLowerCase() === 'male').length,
+      female: residents.filter(r => r.sex?.toLowerCase() === 'female').length,
+      other: residents.filter(r => r.sex && !['male','female'].includes(r.sex.toLowerCase())).length,
+    },
+    civil: {
+      single: residents.filter(r => r.civil_status?.toLowerCase() === 'single').length,
+      married: residents.filter(r => r.civil_status?.toLowerCase() === 'married').length,
+      widowed: residents.filter(r => r.civil_status?.toLowerCase() === 'widowed').length,
+      divorced: residents.filter(r => r.civil_status?.toLowerCase() === 'divorced').length,
+      separated: residents.filter(r => r.civil_status?.toLowerCase() === 'separated').length,
+    },
+    age: {
+      children: residents.filter(r => r.age < 13).length,
+      teens: residents.filter(r => r.age >= 13 && r.age < 20).length,
+      adults: residents.filter(r => r.age >= 20 && r.age < 60).length,
+      seniors: residents.filter(r => r.age >= 60).length,
+    },
+    voter: {
+      registered: residents.filter(r => r.voter_status?.toLowerCase() === 'registered').length,
+      unregistered: residents.filter(r => r.voter_status?.toLowerCase() === 'unregistered').length,
+      active: residents.filter(r => r.voter_status?.toLowerCase() === 'active').length,
+      inactive: residents.filter(r => r.voter_status?.toLowerCase() === 'inactive').length,
+    }
+  }), [residents]);
   
+
   // Update filtered residents when search, residents, or statusFilter changes
   useEffect(() => {
     fetchResidents();
   }, []);
 
-  // Handle escape key to close image modal
-  // --- Analytics UI State ---
-  const [selectedCategory, setSelectedCategory] = useState('gender');
+  // Update chart data when residents, year, or month changes
+  useEffect(() => {
+    if (residents.length > 0) {
+      setChartData(generateChartData(residents, selectedAnalyticsYear, selectedAnalyticsMonth));
+    }
+  }, [residents, selectedAnalyticsYear, selectedAnalyticsMonth]);
 
   // Analytics options object
   const analyticsOptions = {
     gender: {
       key: 'gender',
       label: 'Gender',
-      value: genderStats.male + genderStats.female + genderStats.other,
+      value: analyticsData.gender.male + analyticsData.gender.female + analyticsData.gender.other,
       icon: <UserIcon className="w-6 h-6 text-green-600" />,
       iconBg: 'bg-green-50',
       details: (
         <div className="pl-4 pt-2 text-sm space-y-1">
-          <div>Male: <span className="font-bold">{genderStats.male}</span></div>
-          <div>Female: <span className="font-bold">{genderStats.female}</span></div>
-          <div>Other Gender: <span className="font-bold">{genderStats.other}</span></div>
+          <div>Male: <span className="font-bold">{analyticsData.gender.male}</span></div>
+          <div>Female: <span className="font-bold">{analyticsData.gender.female}</span></div>
+          <div>Other Gender: <span className="font-bold">{analyticsData.gender.other}</span></div>
         </div>
       )
     },
     civil: {
       key: 'civil',
       label: 'Civil Status',
-      value: civilStatusStats.single + civilStatusStats.married + civilStatusStats.widowed + civilStatusStats.divorced + civilStatusStats.separated,
+      value: analyticsData.civil.single + analyticsData.civil.married + analyticsData.civil.widowed + analyticsData.civil.divorced + analyticsData.civil.separated,
       icon: <HeartIcon className="w-6 h-6 text-pink-600" />,
       iconBg: 'bg-pink-50',
       details: (
         <div className="pl-4 pt-2 text-sm space-y-1">
-          <div>Single: <span className="font-bold">{civilStatusStats.single}</span></div>
-          <div>Married: <span className="font-bold">{civilStatusStats.married}</span></div>
-          <div>Widowed: <span className="font-bold">{civilStatusStats.widowed}</span></div>
-          <div>Divorced: <span className="font-bold">{civilStatusStats.divorced}</span></div>
-          <div>Separated: <span className="font-bold">{civilStatusStats.separated}</span></div>
+          <div>Single: <span className="font-bold">{analyticsData.civil.single}</span></div>
+          <div>Married: <span className="font-bold">{analyticsData.civil.married}</span></div>
+          <div>Widowed: <span className="font-bold">{analyticsData.civil.widowed}</span></div>
+          <div>Divorced: <span className="font-bold">{analyticsData.civil.divorced}</span></div>
+          <div>Separated: <span className="font-bold">{analyticsData.civil.separated}</span></div>
         </div>
       )
     },
     age: {
       key: 'age',
       label: 'Age Group',
-      value: ageGroupStats.children + ageGroupStats.teens + ageGroupStats.adults + ageGroupStats.seniors,
+      value: analyticsData.age.children + analyticsData.age.teens + analyticsData.age.adults + analyticsData.age.seniors,
       icon: <UserIcon className="w-6 h-6 text-blue-600" />,
       iconBg: 'bg-blue-50',
-      details: (
-        <div className="pl-4 pt-2 text-sm space-y-1">
-          <div>Children (&lt;13): <span className="font-bold">{ageGroupStats.children}</span></div>
-          <div>Teens (13-19): <span className="font-bold">{ageGroupStats.teens}</span></div>
-          <div>Adults (20-59): <span className="font-bold">{ageGroupStats.adults}</span></div>
-          <div>Seniors (60+): <span className="font-bold">{ageGroupStats.seniors}</span></div>
-        </div>
-      )
-    }
+     details: (
+       <div className="pl-4 pt-2 text-sm space-y-1">
+         <div>Children (under 13): <span className="font-bold">{analyticsData.age.children}</span></div>
+         <div>Teens (13-19): <span className="font-bold">{analyticsData.age.teens}</span></div>
+         <div>Adults (20-59): <span className="font-bold">{analyticsData.age.adults}</span></div>
+         <div>Seniors (60+): <span className="font-bold">{analyticsData.age.seniors}</span></div>
+       </div>
+     )
+    },
   };
 
   useEffect(() => {
@@ -247,19 +573,19 @@ const ResidentsRecords = () => {
       },
       {
         label: 'Active Voters',
-        value: voterStatusStats.active,
+        value: analyticsData.voter.active,
         icon: <CheckCircleIcon className="w-5 h-5 text-green-600" />,
         iconBg: 'bg-green-100',
       },
       {
         label: 'Inactive Voters',
-        value: voterStatusStats.inactive,
+        value: analyticsData.voter.inactive,
         icon: <XCircleIcon className="w-5 h-5 text-gray-500" />,
         iconBg: 'bg-gray-100',
       },
       {
         label: 'Adults',
-        value: ageGroupStats.adults,
+        value: analyticsData.age.adults,
         icon: <UserIcon className="w-5 h-5 text-green-500" />,
         iconBg: 'bg-green-100',
       },
@@ -268,22 +594,22 @@ const ResidentsRecords = () => {
     // Table breakdowns for each category
     const breakdowns = {
       gender: [
-        { label: 'Male', value: genderStats.male },
-        { label: 'Female', value: genderStats.female },
-        { label: 'Other Gender', value: genderStats.other },
+        { label: 'Male', value: analyticsData.gender.male },
+        { label: 'Female', value: analyticsData.gender.female },
+        { label: 'Other Gender', value: analyticsData.gender.other },
       ],
       civil: [
-        { label: 'Single', value: civilStatusStats.single },
-        { label: 'Married', value: civilStatusStats.married },
-        { label: 'Widowed', value: civilStatusStats.widowed },
-        { label: 'Divorced', value: civilStatusStats.divorced },
-        { label: 'Separated', value: civilStatusStats.separated },
+        { label: 'Single', value: analyticsData.civil.single },
+        { label: 'Married', value: analyticsData.civil.married },
+        { label: 'Widowed', value: analyticsData.civil.widowed },
+        { label: 'Divorced', value: analyticsData.civil.divorced },
+        { label: 'Separated', value: analyticsData.civil.separated },
       ],
       age: [
-        { label: 'Children (<13)', value: ageGroupStats.children },
-        { label: 'Teens (13-19)', value: ageGroupStats.teens },
-        { label: 'Adults (20-59)', value: ageGroupStats.adults },
-        { label: 'Seniors (60+)', value: ageGroupStats.seniors },
+        { label: 'Children (under 13)', value: analyticsData.age.children },
+        { label: 'Teens (13-19)', value: analyticsData.age.teens },
+        { label: 'Adults (20-59)', value: analyticsData.age.adults },
+        { label: 'Seniors (60+)', value: analyticsData.age.seniors },
       ],
     };
 
@@ -303,44 +629,110 @@ const ResidentsRecords = () => {
           <p className="text-gray-500 text-sm">A formal summary of resident demographics and key statistics.</p>
         </div>
 
-        {/* Summary Row */}
-        <div className="flex flex-wrap gap-4 mb-8">
-          {summaryStats.map((stat) => (
-            <div key={stat.label} className="flex items-center bg-white rounded-xl px-4 py-2 shadow border border-gray-100 min-w-[140px]">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 ${stat.iconBg}`}>{stat.icon}</div>
-              <div>
-                <div className="text-xs text-gray-500">{stat.label}</div>
-                <div className="text-lg font-bold text-gray-800">{stat.value}</div>
+        {/* Enhanced Summary Row with Advanced Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {summaryStats.map((stat, index) => (
+            <div
+              key={stat.label}
+              className="group bg-white rounded-2xl p-6 shadow-xl border border-gray-100 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 animate-fade-in-up"
+              style={{ animationDelay: `${index * 100}ms` }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-110 ${stat.iconBg} group-hover:shadow-xl`}>
+                  {stat.icon}
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-extrabold text-gray-900 group-hover:text-green-600 transition-colors duration-300">
+                    {stat.value.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-500 font-medium group-hover:text-gray-700 transition-colors duration-300">
+                    {stat.label}
+                  </div>
+                </div>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 group-hover:h-3 transition-all duration-300">
+                <div
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 h-2 rounded-full transition-all duration-500 group-hover:from-green-600 group-hover:to-emerald-600"
+                  style={{ width: `${Math.min((stat.value / residents.length) * 100, 100)}%` }}
+                ></div>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Category Dropdown and Breakdown Table */}
-        <div className="bg-gray-50 rounded-2xl border border-gray-100 shadow-sm p-6 max-w-md">
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-semibold text-gray-700">Category Breakdown</div>
-            <select
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-            >
-              <option value="gender">Gender</option>
-              <option value="civil">Civil Status</option>
-              <option value="age">Age Group</option>
-            </select>
+        {/* Enhanced Category Breakdown with Interactive Design */}
+        <div className="bg-gradient-to-br from-gray-50 to-white rounded-3xl border border-gray-200 shadow-xl p-8 max-w-lg hover:shadow-2xl transition-all duration-500">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
+                <ChartBarIcon className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="font-bold text-gray-900 text-lg">Category Breakdown</div>
+                <div className="text-sm text-gray-600">Interactive demographic analysis</div>
+              </div>
+            </div>
+            <div className="relative">
+              <select
+                className="appearance-none bg-white border border-gray-300 rounded-xl px-4 py-3 pr-10 text-sm font-medium focus:ring-2 focus:ring-green-500 focus:border-transparent shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+              >
+                <option value="gender">👥 Gender</option>
+                <option value="civil">💍 Civil Status</option>
+                <option value="age">🎂 Age Group</option>
+              </select>
+              <ChevronDownIcon className="w-5 h-5 absolute right-3 top-3.5 text-gray-400 pointer-events-none" />
+            </div>
           </div>
-          <div className="mb-2 text-lg font-bold text-gray-800">{categoryLabels[selectedCategory]}</div>
-          <table className="w-full text-sm">
-            <tbody>
-              {breakdowns[selectedCategory].map((row) => (
-                <tr key={row.label} className="border-b last:border-b-0">
-                  <td className="py-2 text-gray-600">{row.label}</td>
-                  <td className="py-2 text-right font-semibold text-gray-900">{row.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          <div className="mb-6">
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">{categoryLabels[selectedCategory]}</h3>
+            <div className="w-16 h-1 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full"></div>
+          </div>
+
+          <div className="space-y-4">
+            {breakdowns[selectedCategory].map((row, index) => {
+              const percentage = residents.length > 0 ? (row.value / residents.length) * 100 : 0;
+              return (
+                <div
+                  key={row.label}
+                  className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-lg transition-all duration-300 hover:scale-102 animate-fade-in-up"
+                  style={{ animationDelay: `${index * 100}ms` }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-medium text-gray-900">{row.label}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-gray-900">{row.value}</span>
+                      <span className="text-sm text-gray-500">({percentage.toFixed(1)}%)</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all duration-1000 ease-out"
+                      style={{
+                        width: `${percentage}%`,
+                        animationDelay: `${index * 200}ms`
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Quick Insights */}
+          <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+            <div className="flex items-center gap-2 mb-2">
+              <GlobeAltIcon className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-semibold text-blue-900">Quick Insight</span>
+            </div>
+            <p className="text-sm text-blue-800">
+              {selectedCategory === 'gender' && `${analyticsData.gender.female > analyticsData.gender.male ? 'More females' : 'More males'} in the community`}
+              {selectedCategory === 'civil' && `${analyticsData.civil.married} married residents (${((analyticsData.civil.married / residents.length) * 100).toFixed(1)}% of total)`}
+              {selectedCategory === 'age' && `${analyticsData.age.adults} adults in working age (${((analyticsData.age.adults / residents.length) * 100).toFixed(1)}% of total)`}
+            </p>
+          </div>
         </div>
       </section>
     );
@@ -366,6 +758,7 @@ const ResidentsRecords = () => {
       // Attach computed update_status to each resident for consistent UI
       const withStatus = fetched.map((r) => ({ ...r, update_status: getResidentStatus(r) }));
       setResidents(withStatus);
+      setChartData(generateChartData(withStatus, selectedAnalyticsYear, selectedAnalyticsMonth));
     } catch (err) {
       console.error("Error loading residents:", err);
     } finally {
@@ -377,10 +770,28 @@ const ResidentsRecords = () => {
     try {
       setResidentsUsersLoading(true);
       const res = await axiosInstance.get("/admin/residents-users");
-      console.log("Residents users data:", res.data.users);
-      setResidentsUsers(res.data.users);
+      
+      // Ensure we have valid data before updating state
+      if (res.data && Array.isArray(res.data.users)) {
+        console.log("Fetched residents users data:", res.data.users);
+        
+        // Map the data to ensure all required fields are present
+        const processedUsers = res.data.users.map(user => ({
+          ...user,
+          profile: user.profile ? {
+            ...user.profile,
+            verification_status: user.profile.verification_status || 'pending'
+          } : null
+        }));
+        
+        setResidentsUsers(processedUsers);
+      } else {
+        console.error("Invalid data format received:", res.data);
+        toast.error("Error loading residents data. Please try again.");
+      }
     } catch (err) {
       console.error("Error loading residents users:", err);
+      toast.error("Failed to load residents data. Please refresh the page.");
     } finally {
       setResidentsUsersLoading(false);
     }
@@ -400,14 +811,16 @@ const ResidentsRecords = () => {
 
   const handleRestore = async (residentId) => {
     try {
-      await axiosInstance.post(`/admin/residents/${residentId}/restore`);
-      alert("Resident restored successfully.");
-      // Refresh the data
+      // Backend route is POST /residents/{id}/restore (protected by auth+admin middleware)
+  await axiosInstance.post(`/residents/${residentId}/restore`);
+  showInfo("Resident restored successfully.", 'Restore', 'success');
+      // Refresh the lists and close the Recently Deleted view
       fetchRecentlyDeletedResidents();
       fetchResidents();
+      setShowRecentlyDeleted(false);
     } catch (err) {
       console.error("Failed to restore resident:", err);
-      alert("Failed to restore resident.");
+      showInfo("Failed to restore resident: " + (err?.response?.data?.message || err.message), 'Restore Error', 'error');
     }
   };
 
@@ -424,7 +837,7 @@ const ResidentsRecords = () => {
       
       // Check if residency verification is denied
       if (resident.verification_status === 'denied') {
-        alert("This resident's residency verification has been denied. Details cannot be viewed.");
+        showInfo("This resident's residency verification has been denied. Details cannot be viewed.", 'Verification', 'info');
         setDetailLoading(false);
         return;
       }
@@ -441,7 +854,7 @@ const ResidentsRecords = () => {
   const handleUpdate = (resident) => {
     // Check if residency verification is denied
     if (resident.verification_status === 'denied') {
-      alert("This resident's residency verification has been denied. Profile cannot be edited.");
+      showInfo("This resident's residency verification has been denied. Profile cannot be edited.", 'Verification', 'info');
       return;
     }
     
@@ -566,7 +979,7 @@ const ResidentsRecords = () => {
       } else if (editData.user_id) {
         const alreadyExists = await checkIfProfileExists(editData.user_id);
         if (alreadyExists) {
-          alert("❌ This user already has a resident profile.");
+          showInfo("❌ This user already has a resident profile.", 'Create Profile', 'error');
           return;
         }
         await axiosInstance.post(
@@ -575,7 +988,7 @@ const ResidentsRecords = () => {
           { headers: { "Content-Type": "multipart/form-data" } }
         );
       }
-      alert("✅ Resident profile saved successfully.");
+  showInfo("✅ Resident profile saved successfully.", 'Saved', 'success');
       setShowModal(false);
       fetchResidents();
     } catch (err) {
@@ -589,8 +1002,8 @@ const ResidentsRecords = () => {
       } else if (err.response?.data?.error) {
         errorDetails = err.response.data.error;
       }
-      console.error("❌ Save failed:", err.response?.data || err);
-      alert(`❌ Failed to save resident.\n${errorMsg}\nDetails:\n${errorDetails}`);
+  console.error("❌ Save failed:", err.response?.data || err);
+  showInfo(`❌ Failed to save resident.\n${errorMsg}\nDetails:\n${errorDetails}`, 'Save Error', 'error');
     }
   };
 
@@ -601,7 +1014,7 @@ const ResidentsRecords = () => {
       setSelectedUserId("");
       setShowSelectModal(true);
     } else {
-      alert("✅ All users already have resident profiles.");
+      showInfo("✅ All users already have resident profiles.", 'Info', 'info');
     }
   };
 
@@ -616,13 +1029,50 @@ const ResidentsRecords = () => {
   };
 
   const handleApprove = async (residentId) => {
+    if (!residentId) {
+      toast.error('Invalid resident ID');
+      return;
+    }
+
     try {
-      await axiosInstance.post(`/admin/residents/${residentId}/approve-verification`);
-      alert("Residency verification approved successfully.");
-      fetchResidents(); // Refresh the data
+      setResidentsUsersLoading(true);
+      
+      // Step 1: Call approval endpoint
+      const response = await axiosInstance.post(`/admin/residents/${residentId}/approve-verification`);
+      
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || 'Failed to approve verification');
+      }
+
+      // Step 2: Update local state immediately
+      setResidentsUsers(prevUsers => 
+        prevUsers.map(user => {
+          if (user.profile?.id === residentId) {
+            return {
+              ...user,
+              profile: {
+                ...user.profile,
+                verification_status: 'approved'
+              }
+            };
+          }
+          return user;
+        })
+      );
+      
+      // Step 3: Show success message
+      toast.success('Verification approved successfully. Resident can now complete their profile.');
+      
+      // Step 4: Refresh all data
+      await Promise.all([
+        fetchResidents(),
+        fetchResidentsUsers()
+      ]);
     } catch (err) {
-      console.error("Failed to approve residency verification:", err);
-      alert("Failed to approve residency verification.");
+      console.error('Failed to approve:', err);
+      toast.error(err.message || 'Failed to approve verification');
+    } finally {
+      setResidentsUsersLoading(false);
     }
   };
 
@@ -634,7 +1084,7 @@ const ResidentsRecords = () => {
 
   const handleDenySubmit = async () => {
     if (!comment.trim()) {
-      alert("Please provide a reason for denial.");
+      showInfo("Please provide a reason for denial.", 'Validation', 'error');
       return;
     }
 
@@ -642,18 +1092,41 @@ const ResidentsRecords = () => {
       await axiosInstance.post(`/admin/residents/${currentResidentId}/deny-verification`, {
         comment: comment
       });
-      alert("Residency verification denied successfully.");
+  showInfo("Residency verification denied successfully.", 'Denied', 'success');
       setShowCommentModal(false);
-      fetchResidents(); // Refresh the data
+      // Refresh both datasets so admin tables reflect changes
+      fetchResidents();
+      fetchResidentsUsers();
     } catch (err) {
-      console.error("Failed to deny residency verification:", err);
-      alert("Failed to deny residency verification.");
+  console.error("Failed to deny residency verification:", err);
+  showInfo("Failed to deny residency verification.", 'Error', 'error');
+    }
+  };
+
+  // Triggers the confirm modal
+  const handleDelete = (residentId) => {
+    openConfirm(residentId);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return closeConfirm();
+    try {
+      await axiosInstance.post(`/admin/residents/${pendingDeleteId}/delete`);
+      showInfo('Resident deleted successfully.', 'Deleted', 'success');
+      fetchResidents();
+      fetchRecentlyDeletedResidents();
+      setShowRecentlyDeleted(true);
+    } catch (err) {
+      console.error('Failed to delete resident:', err);
+      showInfo(`Failed to delete resident: ${err.response?.data?.message || err.message || 'Unknown error'}`, 'Delete Error', 'error');
+    } finally {
+      closeConfirm();
     }
   };
 
   const handleConfirmSelection = async () => {
     if (!selectedUserId) {
-      alert("❌ Please select a user.");
+      showInfo("❌ Please select a user.", 'Validation', 'error');
       return;
     }
 
@@ -704,7 +1177,7 @@ const ResidentsRecords = () => {
       setShowModal(true);
     } catch (err) {
       console.error("❌ Failed to load selected user:", err);
-      alert("❌ Could not load user information.");
+      showInfo("❌ Could not load user information.", 'Error', 'error');
     }
   };
 
@@ -854,33 +1327,605 @@ const ResidentsRecords = () => {
     return 'Needs Verification';
   }
 
+  // Generate chart data for monthly resident registrations
+  const generateChartData = (residents, year = '', month = 0) => {
+    const now = new Date();
+    let data = [];
+
+    if (year && month > 0) {
+      // Daily data for selected month and year
+      const monthStart = new Date(year, month - 1, 1);
+      const monthEnd = new Date(year, month, 0);
+      const dailyData = {};
+      residents.forEach(resident => {
+        if (resident.created_at) {
+          const date = new Date(resident.created_at);
+          if (date >= monthStart && date <= monthEnd) {
+            const dayKey = date.toISOString().split('T')[0];
+            dailyData[dayKey] = (dailyData[dayKey] || 0) + 1;
+          }
+        }
+      });
+      // Fill all days of the month
+      for (let day = 1; day <= monthEnd.getDate(); day++) {
+        const date = new Date(year, month - 1, day);
+        const key = date.toISOString().split('T')[0];
+        data.push({
+          month: date.getDate().toString(),
+          registrations: dailyData[key] || 0
+        });
+      }
+    } else if (year) {
+      // Monthly data for selected year
+      const yearlyData = {};
+      residents.forEach(resident => {
+        if (resident.created_at) {
+          const date = new Date(resident.created_at);
+          if (date.getFullYear() == year) {
+            const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            yearlyData[monthKey] = (yearlyData[monthKey] || 0) + 1;
+          }
+        }
+      });
+      // Fill all months of the year
+      for (let m = 0; m < 12; m++) {
+        const date = new Date(year, m, 1);
+        const key = `${year}-${String(m + 1).padStart(2, '0')}`;
+        data.push({
+          month: date.toLocaleDateString('en-US', { month: 'short' }),
+          registrations: yearlyData[key] || 0
+        });
+      }
+    } else {
+      // Last 12 months
+      const monthlyData = {};
+      residents.forEach(resident => {
+        if (resident.created_at) {
+          const date = new Date(resident.created_at);
+          const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          monthlyData[monthYear] = (monthlyData[monthYear] || 0) + 1;
+        }
+      });
+
+      // Get last 12 months
+      for (let i = 11; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        data.push({
+          month: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          registrations: monthlyData[key] || 0
+        });
+      }
+    }
+    return data;
+  };
+
+  // Get most common demographic insights
+  const getMostCommonDemographic = (residents, field, filterByMonth = false) => {
+    const now = new Date();
+    const filtered = filterByMonth ? residents.filter(resident => {
+      if (!resident.created_at) return false;
+      const date = new Date(resident.created_at);
+      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    }) : residents;
+
+    const counts = {};
+    filtered.forEach(resident => {
+      const value = resident[field];
+      if (value) {
+        counts[value] = (counts[value] || 0) + 1;
+      }
+    });
+
+    let max = 0;
+    let most = '';
+    for (const [value, count] of Object.entries(counts)) {
+      if (count > max) {
+        max = count;
+        most = value;
+      }
+    }
+    return { value: most, count: max };
+  };
+
   // (status is attached on fetch as `update_status`; we compute locally as fallback)
 
   // UI controls for filter and sort
   const renderUIControls = () => {
     return (
-    <>
+  <>
       <Navbar />
       <Sidebar />
-      <main className="bg-gradient-to-br from-green-50 to-white min-h-screen ml-64 pt-36 px-6 pb-16 font-sans transition-all duration-300">
+      <main className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 min-h-screen ml-64 pt-36 px-6 pb-16 font-sans transition-all duration-300">
         <div className="w-full max-w-7xl mx-auto space-y-8">
-          {/* Enhanced Header */}
-          <div className="text-center space-y-4 animate-fade-in">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full shadow-xl mb-4 transform transition-transform duration-300 hover:scale-110">
-              <UserIcon className="w-10 h-10 text-white" />
+          {/* Enhanced Header with Advanced Animations */}
+          <div className="text-center space-y-6 animate-fade-in">
+            <div className="relative">
+              <div className="inline-flex items-center justify-center w-28 h-28 bg-gradient-to-br from-indigo-600 via-purple-600 to-blue-700 rounded-3xl shadow-2xl mb-6 transform transition-all duration-700 hover:scale-110 hover:rotate-6 hover:shadow-3xl relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-3xl animate-pulse opacity-60"></div>
+                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/20 to-transparent rounded-3xl"></div>
+                <UserIcon className="w-14 h-14 text-white relative z-10 drop-shadow-lg" />
+              </div>
+              <div className="absolute -top-3 -right-3 w-10 h-10 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 rounded-full flex items-center justify-center shadow-xl animate-bounce">
+                <SparklesIcon className="w-5 h-5 text-white drop-shadow-sm" />
+              </div>
             </div>
-            <h1 className="text-5xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent tracking-tight animate-slide-in">
-              Residents Records
-            </h1>
-            <p className="text-gray-600 text-lg max-w-2xl mx-auto leading-relaxed animate-fade-in-up">
-              Comprehensive management system for barangay resident records with detailed profiles and real-time updates.
-            </p>
+
+            <div className="space-y-6">
+              <h1 className="text-7xl font-black bg-gradient-to-r from-indigo-700 via-purple-700 to-blue-800 bg-clip-text text-transparent tracking-tight animate-slide-in-up drop-shadow-lg">
+                Residents Records
+              </h1>
+              <div className="flex justify-center">
+                <div className="w-40 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-600 rounded-full shadow-lg animate-fade-in-up animation-delay-300"></div>
+              </div>
+            </div>
+
+            <div className="max-w-4xl mx-auto space-y-6 animate-fade-in-up animation-delay-500">
+              <p className="text-slate-700 text-2xl leading-relaxed font-semibold">
+                Advanced Management System for Barangay Community
+              </p>
+              <p className="text-slate-600 text-lg leading-relaxed max-w-2xl mx-auto">
+                Comprehensive resident profiles, real-time analytics, and intelligent reporting tools for efficient community governance and administration.
+              </p>
+            </div>
+
+            {/* Enhanced Quick Stats Preview */}
+            <div className="flex flex-wrap justify-center gap-6 mt-10 animate-fade-in-up animation-delay-700">
+              <div className="group bg-white/90 backdrop-blur-md rounded-3xl px-8 py-5 shadow-xl border border-indigo-100 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 to-purple-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="flex items-center gap-4 relative z-10">
+                  <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <UserGroupIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-3xl font-black text-slate-900 group-hover:text-indigo-700 transition-colors duration-300">{residents.length}</div>
+                    <div className="text-sm text-slate-600 font-semibold">Total Residents</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="group bg-white/90 backdrop-blur-md rounded-3xl px-8 py-5 shadow-xl border border-emerald-100 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 to-green-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="flex items-center gap-4 relative z-10">
+                  <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <CheckCircleIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-3xl font-black text-slate-900 group-hover:text-emerald-700 transition-colors duration-300">{analyticsData.voter.active}</div>
+                    <div className="text-sm text-slate-600 font-semibold">Active Voters</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="group bg-white/90 backdrop-blur-md rounded-3xl px-8 py-5 shadow-xl border border-rose-100 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-rose-50 to-pink-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="flex items-center gap-4 relative z-10">
+                  <div className="w-12 h-12 bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <UserIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-3xl font-black text-slate-900 group-hover:text-rose-700 transition-colors duration-300">{analyticsData.age.adults}</div>
+                    <div className="text-sm text-slate-600 font-semibold">Adults</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Analytics Summary and Breakdown */}
-          {renderAnalytics()}
+          {/* Enhanced Statistics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+            <div className="group bg-white/80 backdrop-blur-sm rounded-3xl p-8 shadow-xl border border-slate-200 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 to-purple-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <UserGroupIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-600 uppercase tracking-wider">Total</p>
+                    <p className="text-4xl font-black text-slate-900 group-hover:text-indigo-700 transition-colors duration-300">{residents.length}</p>
+                  </div>
+                </div>
+                <p className="text-lg font-bold text-slate-700 group-hover:text-indigo-600 transition-colors duration-300">Residents</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 mt-4 overflow-hidden">
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 h-2 rounded-full transition-all duration-1000 group-hover:from-indigo-600 group-hover:to-purple-700" style={{ width: '100%' }}></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="group bg-white/80 backdrop-blur-sm rounded-3xl p-8 shadow-xl border border-slate-200 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 to-green-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-gradient-to-br from-emerald-500 to-green-600 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <CheckCircleIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-600 uppercase tracking-wider">Active</p>
+                    <p className="text-4xl font-black text-slate-900 group-hover:text-emerald-700 transition-colors duration-300">{residents.filter(r => r.update_status === 'Active').length}</p>
+                  </div>
+                </div>
+                <p className="text-lg font-bold text-slate-700 group-hover:text-emerald-600 transition-colors duration-300">Records</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 mt-4 overflow-hidden">
+                  <div className="bg-gradient-to-r from-emerald-500 to-green-600 h-2 rounded-full transition-all duration-1000 group-hover:from-emerald-600 group-hover:to-green-700" style={{ width: `${residents.length > 0 ? (residents.filter(r => r.update_status === 'Active').length / residents.length) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="group bg-white/80 backdrop-blur-sm rounded-3xl p-8 shadow-xl border border-slate-200 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-amber-50 to-orange-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <ExclamationTriangleIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-600 uppercase tracking-wider">Review</p>
+                    <p className="text-4xl font-black text-slate-900 group-hover:text-amber-700 transition-colors duration-300">{residents.filter(r => r.for_review).length}</p>
+                  </div>
+                </div>
+                <p className="text-lg font-bold text-slate-700 group-hover:text-amber-600 transition-colors duration-300">Pending</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 mt-4 overflow-hidden">
+                  <div className="bg-gradient-to-r from-amber-500 to-orange-600 h-2 rounded-full transition-all duration-1000 group-hover:from-amber-600 group-hover:to-orange-700" style={{ width: `${residents.length > 0 ? (residents.filter(r => r.for_review).length / residents.length) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="group bg-white/80 backdrop-blur-sm rounded-3xl p-8 shadow-xl border border-slate-200 hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-cyan-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <div className="relative z-10">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-gradient-to-br from-blue-500 to-cyan-600 shadow-lg group-hover:scale-110 transition-transform duration-300">
+                    <ShieldCheckIcon className="w-8 h-8 text-white" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-600 uppercase tracking-wider">Verified</p>
+                    <p className="text-4xl font-black text-slate-900 group-hover:text-blue-700 transition-colors duration-300">{residents.filter(r => r.verification_status === 'approved').length}</p>
+                  </div>
+                </div>
+                <p className="text-lg font-bold text-slate-700 group-hover:text-blue-600 transition-colors duration-300">Profiles</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 mt-4 overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-500 to-cyan-600 h-2 rounded-full transition-all duration-1000 group-hover:from-blue-600 group-hover:to-cyan-700" style={{ width: `${residents.length > 0 ? (residents.filter(r => r.verification_status === 'approved').length / residents.length) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Enhanced Analytics Section */}
+          <div className="bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl border border-slate-200 p-8 mb-12 relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-50 to-indigo-50 opacity-50"></div>
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
+                    <ChartBarIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-900">Registration Analytics</h3>
+                    <p className="text-slate-600 font-medium">Resident registration trends over the last 12 months</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Analytics Filters */}
+              <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-200">
+                <div className="flex flex-col sm:flex-row gap-3 items-center justify-center">
+                  <select
+                    value={selectedAnalyticsYear}
+                    onChange={(e) => {
+                      setSelectedAnalyticsYear(e.target.value);
+                      setSelectedAnalyticsMonth(0);
+                    }}
+                    className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                  >
+                    <option value="">All Years (Last 12 Months)</option>
+                    {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                      <option key={year} value={year.toString()}>{year}</option>
+                    ))}
+                  </select>
+                  {selectedAnalyticsYear && (
+                    <select
+                      value={selectedAnalyticsMonth}
+                      onChange={(e) => setSelectedAnalyticsMonth(parseInt(e.target.value))}
+                      className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                    >
+                      <option value={0}>All Months</option>
+                      {[
+                        { value: 1, name: 'January' },
+                        { value: 2, name: 'February' },
+                        { value: 3, name: 'March' },
+                        { value: 4, name: 'April' },
+                        { value: 5, name: 'May' },
+                        { value: 6, name: 'June' },
+                        { value: 7, name: 'July' },
+                        { value: 8, name: 'August' },
+                        { value: 9, name: 'September' },
+                        { value: 10, name: 'October' },
+                        { value: 11, name: 'November' },
+                        { value: 12, name: 'December' }
+                      ].map(m => (
+                        <option key={m.value} value={m.value}>{m.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {selectedAnalyticsYear && !selectedAnalyticsMonth && (
+                    <div className="text-sm text-gray-500">Select a month for daily view</div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="bg-white/80 rounded-2xl p-6 shadow-lg border border-slate-100 mb-8">
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" stroke="#64748b" fontSize={12} fontWeight="600" />
+                    <YAxis stroke="#64748b" fontSize={12} fontWeight="600" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '12px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)'
+                      }}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="registrations"
+                      stroke="url(#colorGradient)"
+                      strokeWidth={3}
+                      dot={{ fill: '#6366f1', strokeWidth: 2, r: 6 }}
+                      activeDot={{ r: 8, fill: '#4f46e5' }}
+                    />
+                    <defs>
+                      <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#6366f1" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
+                      </linearGradient>
+                    </defs>
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-4 text-center">
+                {selectedAnalyticsYear && selectedAnalyticsMonth > 0
+                  ? `Daily registrations in ${new Date(selectedAnalyticsYear, selectedAnalyticsMonth - 1, 1).toLocaleString('default', { month: 'long' })} ${selectedAnalyticsYear}`
+                  : selectedAnalyticsYear
+                  ? `Monthly registrations in ${selectedAnalyticsYear}`
+                  : 'Registrations over the last 12 months'}
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-2xl p-6 border border-emerald-200 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <h4 className="text-lg font-bold text-emerald-800 mb-3 flex items-center gap-3">
+                    <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+                      <UserIcon className="w-4 h-4 text-white" />
+                    </div>
+                    Most Common Gender This Month
+                  </h4>
+                  <p className="text-2xl font-black text-emerald-900 mb-1">{getMostCommonDemographic(residents, 'sex', true).value || 'N/A'}</p>
+                  <p className="text-sm text-emerald-700 font-semibold">{getMostCommonDemographic(residents, 'sex', true).count} residents registered</p>
+                </div>
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-200 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <h4 className="text-lg font-bold text-blue-800 mb-3 flex items-center gap-3">
+                    <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+                      <HeartIcon className="w-4 h-4 text-white" />
+                    </div>
+                    Most Common Civil Status
+                  </h4>
+                  <p className="text-2xl font-black text-blue-900 mb-1">{getMostCommonDemographic(residents, 'civil_status', false).value || 'N/A'}</p>
+                  <p className="text-sm text-blue-700 font-semibold">{getMostCommonDemographic(residents, 'civil_status', false).count} residents overall</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          
+          {/* Enhanced Search and Add Section */}
+          <div className="relative bg-gradient-to-br from-white/90 via-slate-50/80 to-indigo-50/70 rounded-2xl shadow-xl border border-slate-200/50 p-6 mb-8 transition-all duration-500 hover:shadow-2xl backdrop-blur-md overflow-hidden">
+            {/* Decorative Background Elements */}
+            <div className="absolute top-0 right-0 w-60 h-60 bg-gradient-to-br from-indigo-200/20 to-purple-300/20 rounded-full -translate-y-30 translate-x-30 blur-2xl"></div>
+            <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-blue-200/20 to-cyan-300/20 rounded-full translate-y-24 -translate-x-24 blur-2xl"></div>
+
+            <div className="relative z-10">
+              {/* Section Header */}
+              <div className="text-center mb-6 animate-fade-in-up">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl shadow-xl mb-4 transform transition-all duration-500 hover:scale-105 hover:rotate-3 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/20 to-transparent"></div>
+                  <SparklesIcon className="w-8 h-8 text-white relative z-10 drop-shadow-lg" />
+                </div>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-800 to-purple-800 bg-clip-text text-transparent mb-2">
+                  Management Control Center
+                </h2>
+                <p className="text-slate-600 text-sm max-w-xl mx-auto font-medium">
+                  Advanced tools for comprehensive resident management, real-time analytics, and streamlined administrative operations
+                </p>
+              </div>
+
+              <div className="flex flex-col xl:flex-row justify-between items-center gap-6">
+                {/* Enhanced Action Buttons Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full xl:w-auto">
+                  <button
+                    onClick={handleAddResidentClick}
+                    className="group relative bg-gradient-to-br from-emerald-600 via-green-600 to-teal-700 hover:from-emerald-700 hover:via-green-700 hover:to-teal-800 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center justify-center gap-3 text-sm font-bold transition-all duration-500 transform hover:scale-105 hover:-translate-y-2 focus:outline-none focus:ring-4 focus:ring-emerald-500/40 overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tl from-transparent via-white/10 to-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center group-hover:rotate-180 group-hover:scale-110 transition-all duration-500 shadow-lg">
+                        <PlusIcon className="w-5 h-5 drop-shadow-sm" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-base">Add Resident</div>
+                        <div className="text-xs text-emerald-100 font-medium">Create new profile</div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { if (!showAnalytics) fetchReports(); setShowAnalytics(!showAnalytics); }}
+                    className="group relative bg-gradient-to-br from-indigo-600 via-blue-600 to-purple-700 hover:from-indigo-700 hover:via-blue-700 hover:to-purple-800 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center justify-center gap-3 text-sm font-bold transition-all duration-500 transform hover:scale-105 hover:-translate-y-2 focus:outline-none focus:ring-4 focus:ring-indigo-500/40 overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tl from-transparent via-white/10 to-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center group-hover:scale-125 group-hover:rotate-12 transition-all duration-500 shadow-lg">
+                        <ChartBarIcon className="w-5 h-5 drop-shadow-sm" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-base">{showAnalytics ? "Hide" : "Show"} Analytics</div>
+                        <div className="text-xs text-indigo-100 font-medium">Reports & insights</div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowResidentsUsers(!showResidentsUsers);
+                      if (!showResidentsUsers) {
+                        fetchResidentsUsers();
+                      }
+                    }}
+                    className="group relative bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-700 hover:from-violet-700 hover:via-purple-700 hover:to-fuchsia-800 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center justify-center gap-3 text-sm font-bold transition-all duration-500 transform hover:scale-105 hover:-translate-y-2 focus:outline-none focus:ring-4 focus:ring-violet-500/40 overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tl from-transparent via-white/10 to-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center group-hover:rotate-45 group-hover:scale-110 transition-all duration-500 shadow-lg">
+                        <UserGroupIcon className="w-5 h-5 drop-shadow-sm" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-base">{showResidentsUsers ? 'View Residents' : 'User Accounts'}</div>
+                        <div className="text-xs text-violet-100 font-medium">Manage users</div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowRecentlyDeleted(!showRecentlyDeleted);
+                      if (!showRecentlyDeleted) {
+                        fetchRecentlyDeletedResidents();
+                      }
+                    }}
+                    className="group relative bg-gradient-to-br from-rose-600 via-red-600 to-orange-700 hover:from-rose-700 hover:via-red-700 hover:to-orange-800 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center justify-center gap-3 text-sm font-bold transition-all duration-500 transform hover:scale-105 hover:-translate-y-2 focus:outline-none focus:ring-4 focus:ring-rose-500/40 overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="absolute inset-0 bg-gradient-to-tl from-transparent via-white/10 to-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center group-hover:-rotate-45 group-hover:scale-110 transition-all duration-500 shadow-lg">
+                        <TrashIcon className="w-5 h-5 drop-shadow-sm" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-base">Deleted Records</div>
+                        <div className="text-xs text-rose-100 font-medium">Recovery center</div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Enhanced Search and Filter Section */}
+                <div className="w-full xl:w-auto xl:min-w-[500px]">
+                  <div className="bg-white/90 backdrop-blur-md rounded-2xl p-6 shadow-xl border border-slate-200/50 transition-all duration-500 hover:shadow-2xl hover:bg-white/95 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/50 to-purple-50/50 opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative z-10">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                          <MagnifyingGlassIcon className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-lg text-slate-900">Search & Filter</h3>
+                          <p className="text-slate-600 text-sm font-medium">Find and filter resident records</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        {/* Enhanced Search Input */}
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none z-10">
+                            <MagnifyingGlassIcon className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors duration-300" />
+                          </div>
+                          <input
+                            type="text"
+                            className="w-full pl-12 pr-12 py-3 border-2 border-slate-200 focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 rounded-2xl text-sm font-medium shadow-lg transition-all duration-300 focus:shadow-xl bg-white hover:shadow-md placeholder-slate-400 group-focus-within:placeholder-indigo-300"
+                            placeholder="🔍 Search residents by name, ID, or any details..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                          />
+                          {search && (
+                            <button
+                              onClick={() => setSearch('')}
+                              className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-red-500 transition-all duration-300 z-10 hover:scale-110"
+                            >
+                              <div className="w-6 h-6 bg-red-100 hover:bg-red-200 rounded-full flex items-center justify-center transition-colors duration-300 shadow-md">
+                                <XMarkIcon className="w-4 h-4" />
+                              </div>
+                            </button>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          {/* Enhanced Status Filter */}
+                          <div className="relative flex-1 group">
+                            <select
+                              value={statusFilter}
+                              onChange={(e) => setStatusFilter(e.target.value)}
+                              className="appearance-none w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 pr-10 text-sm font-semibold focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-lg hover:shadow-md transition-all duration-300 cursor-pointer group-focus-within:border-indigo-500"
+                            >
+                              <option value="">📊 All Status Types</option>
+                              <option value="active">✅ Active Records</option>
+                              <option value="outdated">⏰ Outdated Records</option>
+                              <option value="needs_verification">🔍 Needs Verification</option>
+                              <option value="for_review">👀 For Review</option>
+                            </select>
+                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                              <ChevronDownIcon className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors duration-300" />
+                            </div>
+                            <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+                          </div>
+
+                          {/* Enhanced Advanced Filter Button */}
+                          <button className="group relative bg-gradient-to-br from-slate-600 via-gray-700 to-slate-800 hover:from-slate-700 hover:via-gray-800 hover:to-slate-900 text-white px-6 py-3 rounded-2xl text-sm font-bold shadow-xl transition-all duration-500 transform hover:scale-105 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-slate-500/40 overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                            <div className="relative flex items-center gap-2">
+                              <FunnelIcon className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+                              <span className="hidden sm:inline">Advanced</span>
+                            </div>
+                          </button>
+                        </div>
+
+                        {/* Enhanced Search Results Counter */}
+                        {(search || statusFilter) && (
+                          <div className="flex items-center justify-between text-sm bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl px-4 py-3 animate-fade-in border border-indigo-200 shadow-md">
+                            <span className="flex items-center gap-2 font-semibold text-slate-700">
+                              <CheckCircleIcon className="w-4 h-4 text-indigo-500" />
+                              Found {filteredResidents.length} resident{filteredResidents.length !== 1 ? 's' : ''}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSearch('');
+                                setStatusFilter('');
+                              }}
+                              className="text-indigo-600 hover:text-indigo-800 font-bold transition-colors duration-300 hover:scale-105 transform"
+                            >
+                              Clear filters
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+            {/* Analytics Summary and Breakdown */}
 
           {/* Enhanced Reporting Section */}
+          <div style={{display: showAnalytics ? 'block' : 'none'}}>
+          {renderAnalytics()}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 mb-8">
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
               <div>
@@ -899,22 +1944,6 @@ const ResidentsRecords = () => {
                   <FunnelIcon className="w-4 h-4" />
                   {showReportFilters ? 'Hide Filters' : 'Show Filters'}
                 </button>
-                <button
-                  onClick={() => fetchReports()}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-semibold transition-all duration-300 transform hover:scale-105"
-                >
-                  {fetchingReports ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Loading Reports...
-                    </>
-                  ) : (
-                    <>
-                      <DocumentTextIcon className="w-5 h-5" />
-                      Generate Report
-                    </>
-                  )}
-                </button>
               </div>
             </div>
 
@@ -925,7 +1954,7 @@ const ResidentsRecords = () => {
                   <FunnelIcon className="w-5 h-5 text-blue-600" />
                   Report Filters
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Update Status Filter */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Update Status</label>
@@ -954,6 +1983,37 @@ const ResidentsRecords = () => {
                       <option value="pending">Pending</option>
                       <option value="approved">Approved</option>
                       <option value="denied">Denied</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Year</label>
+                    <select
+                      value={reportFilters.year}
+                      onChange={(e) => handleFilterChange('year', e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">All Years</option>
+                      {Array.from({length: 11}, (_, i) => new Date().getFullYear() - i).map(year => (
+                        <option key={year} value={year.toString()}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Month</label>
+                    <select
+                      value={reportFilters.month}
+                      onChange={(e) => handleFilterChange('month', e.target.value)}
+                      disabled={!reportFilters.year}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent ${!reportFilters.year ? 'border-gray-400 bg-gray-100 cursor-not-allowed' : 'border-gray-300'}`}
+                    >
+                      <option value="">All Months</option>
+                      {reportFilters.year && Array.from({length: 12}, (_, i) => {
+                        const monthNum = i + 1;
+                        const monthName = new Date(parseInt(reportFilters.year), monthNum - 1, 1).toLocaleString('default', { month: 'long' });
+                        return <option key={monthNum} value={monthNum.toString().padStart(2, '0')}>{monthName}</option>;
+                      })}
                     </select>
                   </div>
 
@@ -992,8 +2052,32 @@ const ResidentsRecords = () => {
             {/* Report Statistics */}
             {reportData.length > 0 && (
               <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 mb-6 border border-blue-200">
-                <h4 className="text-lg font-semibold text-blue-800 mb-4">Report Summary</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-lg font-semibold text-blue-800">Report Summary</h4>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        console.log('Calling exportToCSV with data:', reportData);
+                        exportToCSV(reportData);
+                      }}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                    >
+                      <ArrowDownTrayIcon className="w-4 h-4" />
+                      Export CSV
+                    </button>
+                    <button
+                      onClick={() => {
+                        console.log('Calling exportToPDF with data:', reportData);
+                        exportToPDF(reportData);
+                      }}
+                      className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                    >
+                      <DocumentTextIcon className="w-4 h-4" />
+                      Export PDF
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                   <div className="bg-white rounded-lg p-4 text-center shadow-sm">
                     <div className="text-2xl font-bold text-blue-600">{reportData.length}</div>
                     <div className="text-sm text-gray-600">Total Residents</div>
@@ -1016,6 +2100,34 @@ const ResidentsRecords = () => {
                     </div>
                     <div className="text-sm text-gray-600">Needs Review</div>
                   </div>
+                </div>
+
+                {/* Report Chart */}
+                <div className="bg-white rounded-lg p-4 shadow-sm">
+                  <h5 className="text-md font-semibold text-gray-800 mb-4">Status Distribution</h5>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Active', value: reportData.filter(r => r.update_status === 'Active').length, fill: '#10b981' },
+                          { name: 'Outdated', value: reportData.filter(r => r.update_status === 'Outdated').length, fill: '#f59e0b' },
+                          { name: 'Needs Verification', value: reportData.filter(r => r.update_status === 'Needs Verification').length, fill: '#ef4444' },
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={60}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        <Cell fill="#10b981" />
+                        <Cell fill="#f59e0b" />
+                        <Cell fill="#ef4444" />
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             )}
@@ -1096,69 +2208,8 @@ const ResidentsRecords = () => {
               </div>
             )}
           </div>
-
-          {/* Enhanced Search and Add Section */}
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 mb-8 transition-all duration-300 hover:shadow-2xl">
-            <div className="flex flex-col lg:flex-row justify-between items-center gap-6">
-              <div className="flex gap-3">
-                <button
-                  onClick={handleAddResidentClick}
-                  className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white px-8 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-semibold transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
-                >
-                  <PlusIcon className="w-5 h-5" />
-                  Add New Resident
-                </button>
-                <button
-                  onClick={() => {
-                    setShowResidentsUsers(!showResidentsUsers);
-                    if (!showResidentsUsers) {
-                      fetchResidentsUsers();
-                    }
-                  }}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-8 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-semibold transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-                >
-                  {showResidentsUsers ? 'View Residents' : 'View Residents Users'}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowRecentlyDeleted(!showRecentlyDeleted);
-                    if (!showRecentlyDeleted) {
-                      fetchRecentlyDeletedResidents();
-                    }
-                  }}
-                  className="bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white px-8 py-3 rounded-xl shadow-lg flex items-center gap-3 text-sm font-semibold transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
-                >
-                  Recently Deleted
-                </button>
-              </div>
-
-              <div className="flex gap-3 items-center w-full max-w-md">
-                <div className="relative flex-grow">
-                  <input
-                    type="text"
-                    className="w-full pl-12 pr-4 py-3 border border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent rounded-xl text-sm shadow-sm transition-all duration-300 focus:shadow-md"
-                    placeholder="Search residents by name..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                  <MagnifyingGlassIcon className="w-5 h-5 absolute left-4 top-3.5 text-gray-400" />
-                </div>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="active">Active</option>
-                  <option value="outdated">Outdated</option>
-                  <option value="needs_verification">Needs Verification</option>
-                  <option value="for_review">For Review</option>
-                </select>
-                <button className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white px-6 py-3 rounded-xl text-sm font-semibold shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50">
-                  <FunnelIcon className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+          
+          </div>
             
             {/* Residents Users Table */}
             {showResidentsUsers && (
@@ -1223,7 +2274,32 @@ const ResidentsRecords = () => {
                               </span>
                             </td>
                             <td className="px-6 py-4">
+                              {user.profile?.verification_status === 'approved' ? (
+                                <div className="flex items-center gap-2 text-green-700 bg-green-50 px-3 py-2 rounded-lg">
+                                  <CheckIcon className="w-5 h-5" />
+                                  <span className="font-medium">Verified</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 text-yellow-700 bg-yellow-50 px-3 py-2 rounded-lg">
+                                  <ClockIcon className="w-5 h-5" />
+                                  <span className="font-medium">Pending</span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
                               <div className="flex flex-col items-center gap-2">
+                                {/* Verification Status */}
+                                {user.profile?.verification_status === 'approved' ? (
+                                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+                                    <CheckIcon className="w-4 h-4" />
+                                    Verified
+                                  </span>
+                                ) : (
+                                  <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    Pending
+                                  </span>
+                                )}
+                                
                                 {/* Image Preview */}
                                 {user.profile?.residency_verification_image ? (
                                   <div className="relative group">
@@ -1272,7 +2348,7 @@ const ResidentsRecords = () => {
                                 </span>
                               </div>
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 space-x-2">
                               {user.profile?.residency_verification_image ? (
                                 <button
                                   onClick={() => {
@@ -1284,25 +2360,23 @@ const ResidentsRecords = () => {
                                   className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-3 py-1 rounded text-xs font-medium shadow-md flex items-center gap-1 transition-all duration-300 hover:shadow-lg"
                                 >
                                   <EyeIcon className="w-4 h-4" />
-                                  View
+                                  View Document
                                 </button>
                               ) : (
                                 <span className="text-gray-400 text-xs italic">No image uploaded</span>
                               )}
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-col gap-2">
-                                <button
-                                  onClick={() => handleApprove(user.profile?.id)}
-                                  disabled={user.profile?.verification_status === 'approved'}
-                                  className={`px-3 py-1 rounded text-xs font-medium ${
-                                    user.profile?.verification_status === 'approved'
-                                      ? 'bg-green-100 text-green-800 cursor-not-allowed'
-                                      : 'bg-green-500 hover:bg-green-600 text-white'
-                                  } transition-all duration-300 hover:shadow-md`}
-                                >
-                                  Approve
-                                </button>
+                              <div className="flex items-center gap-2">
+                                {user.profile?.verification_status !== 'approved' && (
+                                  <button
+                                    onClick={() => handleApprove(user.profile?.id)}
+                                    className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-3 py-1 rounded text-xs font-medium shadow-md flex items-center gap-1 transition-all duration-300 hover:shadow-lg"
+                                  >
+                                    <CheckIcon className="w-4 h-4" />
+                                    Approve
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleDeny(user.profile?.id)}
                                   disabled={user.profile?.verification_status === 'denied'}
@@ -1355,7 +2429,7 @@ const ResidentsRecords = () => {
                     <tbody className="divide-y divide-gray-100">
                       {recentlyDeletedLoading ? (
                         <tr>
-                          <td colSpan="11" className="px-6 py-12 text-center">
+                          <td colSpan="10" className="px-6 py-12 text-center">
                             <div className="flex flex-col items-center gap-3">
                               <div className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
                               <p className="text-gray-500 font-medium">Loading recently deleted residents...</p>
@@ -1364,7 +2438,7 @@ const ResidentsRecords = () => {
                         </tr>
                       ) : recentlyDeletedResidents.length === 0 ? (
                         <tr>
-                          <td colSpan="11" className="px-6 py-12 text-center">
+                          <td colSpan="10" className="px-6 py-12 text-center">
                             <div className="flex flex-col items-center gap-3">
                               <UserIcon className="w-12 h-12 text-gray-300" />
                               <p className="text-gray-500 font-medium">No recently deleted residents found</p>
@@ -1392,13 +2466,13 @@ const ResidentsRecords = () => {
                             </td>
                             <td className="px-4 py-4 text-gray-700">{r.nationality || "N/A"}</td>
                             <td className="px-4 py-4">
-                              {badge(r.civil_status, getCivilStatusColor(r.civil_status), getCivilStatusIcon(r.civil_status))}
+                              <Badge text={r.civil_status} color={getCivilStatusColor(r.civil_status)} icon={getCivilStatusIcon(r.civil_status)} />
                             </td>
                             <td className="px-4 py-4">
-                              {badge(r.sex, getGenderColor(r.sex), getGenderIcon(r.sex))}
+                              <Badge text={r.sex} color={getGenderColor(r.sex)} icon={getGenderIcon(r.sex)} />
                             </td>
                             <td className="px-4 py-4">
-                              {badge(r.voter_status, getVoterStatusColor(r.voter_status), getVoterStatusIcon(r.voter_status))}
+                              <Badge text={r.voter_status} color={getVoterStatusColor(r.voter_status)} icon={getVoterStatusIcon(r.voter_status)} />
                             </td>
                             <td className="px-4 py-4 text-gray-700">{r.voters_id_number || "N/A"}</td>
                             <td className="px-4 py-4">
@@ -1418,7 +2492,6 @@ const ResidentsRecords = () => {
                 </div>
               </div>
             )}
-          </div>
 
           {/* Enhanced Table */}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
@@ -1485,19 +2558,57 @@ const ResidentsRecords = () => {
                           </td>
                           <td className="px-4 py-4"><span className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs font-medium">{r.age} years</span></td>
                           <td className="px-4 py-4 text-gray-700">{r.nationality || "N/A"}</td>
-                          <td className="px-4 py-4">{badge(r.civil_status, getCivilStatusColor(r.civil_status), getCivilStatusIcon(r.civil_status))}</td>
-                          <td className="px-4 py-4">{badge(r.sex, getGenderColor(r.sex), getGenderIcon(r.sex))}</td>
-                          <td className="px-4 py-4">{badge(r.voter_status, getVoterStatusColor(r.voter_status), getVoterStatusIcon(r.voter_status))}</td>
+                          <td className="px-4 py-4">
+                            <Badge
+                              text={r.civil_status}
+                              color={getCivilStatusColor(r.civil_status)}
+                              icon={getCivilStatusIcon(r.civil_status)}
+                            />
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge
+                              text={r.sex}
+                              color={getGenderColor(r.sex)}
+                              icon={getGenderIcon(r.sex)}
+                            />
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge
+                              text={r.voter_status}
+                              color={getVoterStatusColor(r.voter_status)}
+                              icon={getVoterStatusIcon(r.voter_status)}
+                            />
+                          </td>
                           <td className="px-4 py-4 text-gray-700">{r.voters_id_number || "N/A"}</td>
                           <td className="px-4 py-4">
                             {/* Update Status rendered below */}
-                            <button
-                              onClick={() => handleUpdate(r)}
-                              className="bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md flex items-center gap-2 transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50"
-                            >
-                              <PencilIcon className="w-4 h-4" />
-                              Edit
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleUpdate(r)}
+                                className="bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md flex items-center gap-2 transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50"
+                              >
+                                <PencilIcon className="w-4 h-4" />
+                                Edit
+                              </button>
+                              
+                              {r.verification_status !== 'approved' && (
+                                <button
+                                  onClick={() => handleVerification(r.id, 'approved')}
+                                  className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md flex items-center gap-2 transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
+                                >
+                                  <CheckIcon className="w-4 h-4" />
+                                  Verify
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDelete(r.id)}
+                                className="bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md flex items-center gap-2 transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+                                title="Delete Resident"
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
 
@@ -1706,6 +2817,55 @@ const ResidentsRecords = () => {
                   >
                     Proceed
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Generic Info Modal (replaces alert) */}
+        {showInfoModal && (
+          <div className="fixed inset-0 z-60 bg-black bg-opacity-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg transform transition-all animate-fade-in-up">
+              <div className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold text-gray-900">{infoModal.title}</h3>
+                    <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{infoModal.message}</p>
+                  </div>
+                  <div className="flex items-start">
+                    <button onClick={closeInfo} className="text-gray-500 hover:text-gray-700 focus:outline-none">
+                      <XMarkIcon className="w-6 h-6" />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end">
+                  <button onClick={closeInfo} className="px-5 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl">OK</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Confirm Modal for deletion */}
+        {showConfirmModal && (
+          <div className="fixed inset-0 z-60 bg-black bg-opacity-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md transform transition-all animate-fade-in-up">
+              <div className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold text-gray-900">Confirm Deletion</h3>
+                    <p className="mt-2 text-sm text-gray-700">Are you sure you want to delete this resident? This action cannot be undone.</p>
+                  </div>
+                  <div className="flex items-start">
+                    <button onClick={closeConfirm} className="text-gray-500 hover:text-gray-700 focus:outline-none">
+                      <XMarkIcon className="w-6 h-6" />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button onClick={closeConfirm} className="px-4 py-2 bg-gray-100 rounded-xl">Cancel</button>
+                  <button onClick={confirmDelete} className="px-4 py-2 bg-red-600 text-white rounded-xl">Delete</button>
                 </div>
               </div>
             </div>
@@ -2117,4 +3277,3 @@ const ResidentsRecords = () => {
 };
 
 export default ResidentsRecords;
-

@@ -23,7 +23,9 @@ import {
   SparklesIcon,
   RocketLaunchIcon,
   TrophyIcon,
+  ArrowPathIcon,
 } from "@heroicons/react/24/solid";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 const ProjectManagement = () => {
   const [projects, setProjects] = useState([]);
@@ -47,11 +49,50 @@ const ProjectManagement = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const [showAllFeedbackProjectId, setShowAllFeedbackProjectId] = useState(null);
 
+  // Analytics and search state
+  const [chartData, setChartData] = useState([]);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  // Analytics period selection
+  const [selectedPeriod, setSelectedPeriod] = useState('all');
+  const [selectedYear, setSelectedYear] = useState(2025);
+  const [selectedMonth, setSelectedMonth] = useState(0); // 0 means no month selected
+
   // Fetch projects on component mount
   useEffect(() => {
     fetchProjects();
     fetchFeedbacks();
   }, []);
+
+  // Auto-refresh functionality
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    const interval = setInterval(() => {
+      fetchProjects();
+    }, refreshInterval);
+
+    return () => clearInterval(interval);
+  }, [autoRefresh, refreshInterval]);
+
+  // Manual refresh function
+  const handleManualRefresh = () => {
+    fetchProjects(true);
+  };
+
+  // Toggle auto-refresh
+  const toggleAutoRefresh = () => {
+    setAutoRefresh(!autoRefresh);
+    setToastMessage({
+      type: 'success',
+      message: `Auto-refresh ${!autoRefresh ? 'enabled' : 'disabled'}`,
+      duration: 2000
+    });
+  };
 
   // Filter projects based on search and status
   useEffect(() => {
@@ -67,16 +108,213 @@ const ProjectManagement = () => {
     setFilteredProjects(filtered);
   }, [search, projects, selectedStatus]);
 
-  const fetchProjects = async () => {
+  // Update chart data when projects, period, year, or month changes
+  useEffect(() => {
+    setChartData(generateChartData(projects, selectedPeriod, selectedYear, selectedMonth));
+  }, [projects, selectedPeriod, selectedYear, selectedMonth]);
+
+  const currentYear = new Date().getFullYear();
+
+  // Generate chart data for project creation based on period, year, and month
+  const generateChartData = (projects, period = 'all', year = currentYear, month = 0) => {
+    const now = new Date();
+    let data = [];
+
+    if (period === 'month') {
+      if (!year || month === 0) {
+        // If no specific year/month, use current month
+        const today = new Date();
+        year = today.getFullYear();
+        month = today.getMonth() + 1;
+      }
+      // Daily data for selected month and year
+      const monthStart = new Date(year, month - 1, 1);
+      const monthEnd = new Date(year, month, 0);
+      const dailyData = {};
+      projects.forEach(project => {
+        if (project.created_at) {
+          const date = new Date(project.created_at);
+          if (date >= monthStart && date <= monthEnd) {
+            const dayKey = date.toISOString().split('T')[0];
+            dailyData[dayKey] = (dailyData[dayKey] || 0) + 1;
+          }
+        }
+      });
+      // Fill all days of the month
+      for (let day = 1; day <= monthEnd.getDate(); day++) {
+        const date = new Date(year, month - 1, day);
+        const key = date.toISOString().split('T')[0];
+        data.push({
+          name: date.getDate().toString(),
+          projects: dailyData[key] || 0
+        });
+      }
+    } else if (period === 'year') {
+      if (!year) {
+        year = currentYear;
+      }
+      if (month > 0) {
+        // Daily data for selected month in the year
+        const monthStart = new Date(year, month - 1, 1);
+        const monthEnd = new Date(year, month, 0);
+        const dailyData = {};
+        projects.forEach(project => {
+          if (project.created_at) {
+            const date = new Date(project.created_at);
+            if (date >= monthStart && date <= monthEnd) {
+              const dayKey = date.toISOString().split('T')[0];
+              dailyData[dayKey] = (dailyData[dayKey] || 0) + 1;
+            }
+          }
+        });
+        // Fill all days of the month
+        for (let day = 1; day <= monthEnd.getDate(); day++) {
+          const date = new Date(year, month - 1, day);
+          const key = date.toISOString().split('T')[0];
+          data.push({
+            name: date.getDate().toString(),
+            projects: dailyData[key] || 0
+          });
+        }
+      } else {
+        // Monthly data for selected year
+        const yearlyData = {};
+        projects.forEach(project => {
+          if (project.created_at) {
+            const date = new Date(project.created_at);
+            if (date.getFullYear() === year) {
+              const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+              yearlyData[monthKey] = (yearlyData[monthKey] || 0) + 1;
+            }
+          }
+        });
+        // Fill all months of the year
+        for (let m = 0; m < 12; m++) {
+          const date = new Date(year, m, 1);
+          const key = `${year}-${String(m + 1).padStart(2, '0')}`;
+          data.push({
+            name: date.toLocaleDateString('en-US', { month: 'short' }),
+            projects: yearlyData[key] || 0
+          });
+        }
+      }
+    } else {
+      // Last 12 months
+      const monthlyData = {};
+      projects.forEach(project => {
+        if (project.created_at) {
+          const date = new Date(project.created_at);
+          const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          monthlyData[monthYear] = (monthlyData[monthYear] || 0) + 1;
+        }
+      });
+
+      // Get last 12 months
+      for (let i = 11; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        data.push({
+          name: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          projects: monthlyData[key] || 0
+        });
+      }
+    }
+    return data;
+  };
+
+
+  // Get most frequent project by feedback count based on period, year, and month
+  const getMostFrequentProject = (period = 'all', year = currentYear, month = 0) => {
+    const now = new Date();
+    let filteredFeedbacks = feedbacks;
+    if (period === 'month' && month > 0) {
+      filteredFeedbacks = feedbacks.filter(fb => {
+        if (!fb.created_at) return false;
+        const date = new Date(fb.created_at);
+        return date.getMonth() + 1 === month && date.getFullYear() === year;
+      });
+    } else if (period === 'year') {
+      if (month > 0) {
+        filteredFeedbacks = feedbacks.filter(fb => {
+          if (!fb.created_at) return false;
+          const date = new Date(fb.created_at);
+          return date.getMonth() + 1 === month && date.getFullYear() === year;
+        });
+      } else {
+        filteredFeedbacks = feedbacks.filter(fb => {
+          if (!fb.created_at) return false;
+          const date = new Date(fb.created_at);
+          return date.getFullYear() === year;
+        });
+      }
+    }
+    // else all
+
+    const projectFeedbackCounts = {};
+    filteredFeedbacks.forEach(fb => {
+      if (fb.project_id) {
+        projectFeedbackCounts[fb.project_id] = (projectFeedbackCounts[fb.project_id] || 0) + 1;
+      }
+    });
+
+    let maxCount = 0;
+    let mostProjectId = null;
+    for (const [id, count] of Object.entries(projectFeedbackCounts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostProjectId = id;
+      }
+    }
+    if (!mostProjectId) return { name: 'N/A', count: 0 };
+
+    const project = projects.find(p => p.id === parseInt(mostProjectId));
+    return { name: project ? project.name : 'Unknown', count: maxCount };
+  };
+
+  // Auto-hide toast messages
+  React.useEffect(() => {
+    if (toastMessage && toastMessage.duration > 0) {
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, toastMessage.duration);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  const fetchProjects = async (showRefreshIndicator = false) => {
+    if (showRefreshIndicator) {
+      setIsRefreshing(true);
+    }
+
     try {
       setLoading(true);
       const response = await axios.get('/admin/projects');
       setProjects(response.data);
+      setChartData(generateChartData(response.data, selectedPeriod, selectedYear, selectedMonth));
+      setLastRefresh(new Date());
+
+      if (showRefreshIndicator) {
+        setToastMessage({
+          type: 'success',
+          message: '🔄 Data refreshed successfully',
+          duration: 2000
+        });
+      }
     } catch (err) {
       setError('Failed to fetch projects');
       console.error('Error fetching projects:', err);
+      if (showRefreshIndicator) {
+        setToastMessage({
+          type: 'error',
+          message: '❌ Failed to refresh data',
+          duration: 4000
+        });
+      }
     } finally {
       setLoading(false);
+      if (showRefreshIndicator) {
+        setIsRefreshing(false);
+      }
     }
   };
 
@@ -254,8 +492,49 @@ const ProjectManagement = () => {
     }
   };
 
+  // Toast Notification Component
+  const ToastNotification = ({ message, type, onClose }) => (
+    <div className={`fixed top-24 right-6 z-50 max-w-md rounded-xl shadow-2xl border-2 p-4 transition-all duration-500 transform ${
+      message ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
+    } ${
+      type === 'success'
+        ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-green-800'
+        : type === 'loading'
+          ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200 text-blue-800'
+          : 'bg-gradient-to-r from-red-50 to-rose-50 border-red-200 text-red-800'
+    }`}>
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 mt-0.5">
+          {type === 'success' && <CheckCircleIcon className="w-5 h-5 text-green-600" />}
+          {type === 'loading' && <ArrowPathIcon className="w-5 h-5 text-blue-600 animate-spin" />}
+          {type === 'error' && <ExclamationTriangleIcon className="w-5 h-5 text-red-600" />}
+        </div>
+        <div className="flex-1">
+          <div className="font-semibold text-sm">{message}</div>
+        </div>
+        {type !== 'loading' && (
+          <button
+            onClick={onClose}
+            className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <XMarkIcon className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <>
+      {/* Toast Notification */}
+      {toastMessage && (
+        <ToastNotification
+          message={toastMessage.message}
+          type={toastMessage.type}
+          onClose={() => setToastMessage(null)}
+        />
+      )}
+
       <Navbar />
       <Sidebar />
       <main className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 min-h-screen ml-64 pt-36 px-6 pb-16 font-sans">
@@ -348,6 +627,105 @@ const ProjectManagement = () => {
             </div>
           </div>
 
+          {/* Enhanced Analytics Section */}
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 mb-8">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <ChartBarIcon className="w-5 h-5" />
+                Project Analytics
+              </h3>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => {
+                    setSelectedPeriod(e.target.value);
+                    if (e.target.value !== 'month') setSelectedMonth(0);
+                    setSelectedYear('');
+                  }}
+                  className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-blue-100 focus:border-blue-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                >
+                  <option value="month">This Month</option>
+                  <option value="year">This Year</option>
+                  <option value="all">All Time</option>
+                </select>
+                {(selectedPeriod === 'month' || selectedPeriod === 'year') && (
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => {
+                      setSelectedYear(e.target.value);
+                      setSelectedMonth(0);
+                    }}
+                    className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-blue-100 focus:border-blue-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                  >
+                    <option value="">Select Year</option>
+                    {Array.from({ length: 16 }, (_, i) => currentYear - 10 + i).map(year => (
+                      <option key={year} value={year.toString()}>{year}</option>
+                    ))}
+                  </select>
+                )}
+                {(selectedPeriod === 'month' || selectedPeriod === 'year') && selectedYear && (
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                    className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-blue-100 focus:border-blue-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                  >
+                    <option value={0}>All Months</option>
+                    {[
+                      { value: 1, name: 'January' },
+                      { value: 2, name: 'February' },
+                      { value: 3, name: 'March' },
+                      { value: 4, name: 'April' },
+                      { value: 5, name: 'May' },
+                      { value: 6, name: 'June' },
+                      { value: 7, name: 'July' },
+                      { value: 8, name: 'August' },
+                      { value: 9, name: 'September' },
+                      { value: 10, name: 'October' },
+                      { value: 11, name: 'November' },
+                      { value: 12, name: 'December' }
+                    ].map(m => (
+                      <option key={m.value} value={m.value}>{m.name}</option>
+                    ))}
+                  </select>
+                )}
+                {(selectedPeriod === 'month' || selectedPeriod === 'year') && !selectedYear && (
+                  <select
+                    disabled
+                    className="px-4 py-2 border-2 border-gray-300 bg-gray-100 text-gray-500 rounded-xl text-sm font-medium cursor-not-allowed"
+                  >
+                    <option>Select a year first</option>
+                  </select>
+                )}
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              {selectedPeriod === 'month' ? `Daily projects created in ${selectedMonth ? `${selectedMonth}/${selectedYear}` : 'current month'}` :
+               selectedPeriod === 'year' ? `Monthly projects created in ${selectedYear || currentYear}` :
+               'Projects created over the last 12 months'}
+            </p>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="projects" stroke="#6366f1" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+
+            <div className="mt-6">
+              <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
+                <h4 className="text-sm font-semibold text-indigo-800 mb-2 flex items-center gap-2">
+                  <PhotoIcon className="w-4 h-4" />
+                  Most Frequent Project Posted {selectedPeriod === 'month' ? `(Month ${selectedMonth} ${selectedYear})` : selectedPeriod === 'year' ? `(${selectedYear})` : '(All Time)'}
+                </h4>
+                <p className="text-lg font-bold text-indigo-900">{getMostFrequentProject(selectedPeriod, selectedYear, selectedMonth).name || 'N/A'}</p>
+                <p className="text-sm text-indigo-700">{getMostFrequentProject(selectedPeriod, selectedYear, selectedMonth).count} feedbacks</p>
+              </div>
+            </div>
+          </div>
+
           {/* Enhanced Search and Add Section */}
           <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 p-8 mb-8">
             <div className="flex flex-col lg:flex-row justify-between items-center gap-6">
@@ -359,7 +737,32 @@ const ProjectManagement = () => {
                 {showAddForm ? 'Cancel' : 'Add New Project'}
               </button>
 
-              <div className="flex gap-4 items-center w-full max-w-2xl">
+              <div className="flex gap-4 items-center w-full max-w-3xl">
+                {/* Auto-refresh controls */}
+                <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border">
+                  <button
+                    onClick={toggleAutoRefresh}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 ${
+                      autoRefresh
+                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    <ArrowPathIcon className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} />
+                    Auto
+                  </button>
+                  <button
+                    onClick={handleManualRefresh}
+                    disabled={isRefreshing}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-all duration-200 disabled:opacity-50"
+                  >
+                    <ArrowPathIcon className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                  <span className="text-xs text-gray-500">
+                    {lastRefresh.toLocaleTimeString()}
+                  </span>
+                </div>
                 <div className="relative flex-grow">
                   <input
                     type="text"

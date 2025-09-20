@@ -119,15 +119,47 @@ class PdfService
     
     public function downloadCertificate($path)
     {
+        Log::info('Attempting to download certificate', [
+            'path' => $path,
+            'storage_root' => storage_path('app/public'),
+            'public_path' => public_path('storage'),
+            'storage_exists' => Storage::disk('public')->exists(''),
+            'storage_files' => Storage::disk('public')->files('certificates')
+        ]);
+        
         if (!Storage::disk('public')->exists($path)) {
+            Log::error('Certificate file not found in storage', [
+                'path' => $path,
+                'full_path' => storage_path('app/public/' . $path),
+                'available_files' => Storage::disk('public')->files('certificates')
+            ]);
             throw new \Exception('Certificate file not found: ' . $path);
         }
         
         $fullPath = storage_path('app/public/' . $path);
         $filename = basename($path);
         
-        return response()->download($fullPath, $filename, [
+        if (!file_exists($fullPath)) {
+            Log::error('Certificate file not found at path', [
+                'path' => $path,
+                'full_path' => $fullPath,
+                'storage_path' => storage_path(),
+                'public_path' => public_path(),
+            ]);
+            throw new \Exception('Certificate file not accessible: ' . $fullPath);
+        }
+        
+        Log::info('Certificate file found', [
+            'path' => $path,
+            'full_path' => $fullPath,
+            'filename' => $filename,
+            'file_size' => filesize($fullPath),
+            'is_readable' => is_readable($fullPath)
+        ]);
+        
+        return response()->file($fullPath, [
             'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"'
         ]);
     }
 } 

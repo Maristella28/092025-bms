@@ -1,9 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import axiosInstance from '../../utils/axiosConfig';
 import Navbares from "../../components/Navbares";
 import Sidebares from "../../components/Sidebares";
 import { FaFileAlt, FaBusinessTime, FaIdBadge, FaHome, FaPaperPlane, FaUser, FaCalendarAlt, FaIdCard, FaStar, FaMagic, FaCheckCircle, FaCertificate, FaExclamationTriangle, FaInfoCircle, FaTimes, FaSpinner, FaCamera, FaUpload, FaImage, FaTrash, FaList, FaEye, FaDownload, FaClock, FaCheck } from 'react-icons/fa';
-import axios from '../../utils/axiosConfig';
+// note: axiosInstance is already imported above; avoid duplicate import
 import { useState, useEffect } from 'react';
 import './RequestDocuments.css';
 
@@ -59,7 +60,8 @@ const RequestDocuments = () => {
       if (showLoading) {
         setLoadingResident(true);
       }
-      const response = await axios.get('/residents/my-profile');
+  // axiosInstance.baseURL is '/api', so request paths should be relative to that
+  const response = await axiosInstance.get('/residents/my-profile');
       setResidentData(response.data);
       setLastDataCheck(new Date());
     } catch (err) {
@@ -94,7 +96,7 @@ const RequestDocuments = () => {
   const fetchMyRequests = async () => {
     try {
       setLoadingRequests(true);
-      const response = await axios.get('/document-requests/my');
+  const response = await axiosInstance.get('/document-requests/my');
       setRequests(response.data);
     } catch (err) {
       console.error('Error fetching requests:', err);
@@ -159,7 +161,7 @@ const RequestDocuments = () => {
   const handleDownloadPdf = async (request) => {
     setDownloadingPdf(request.id);
     try {
-      const response = await axios.get(`/document-requests/${request.id}/download-pdf`, {
+  const response = await axiosInstance.get(`/document-requests/${request.id}/download-pdf`, {
         responseType: 'blob'
       });
       
@@ -562,7 +564,7 @@ const RequestDocuments = () => {
         ])
       });
       
-      await axios.post('/document-requests', formData, {
+  await axiosInstance.post('/document-requests', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

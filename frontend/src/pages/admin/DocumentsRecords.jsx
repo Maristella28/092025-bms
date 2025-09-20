@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axiosInstance from '../../utils/axiosConfig';
 import Navbar from "../../components/Navbar";
 import Sidebar from "../../components/Sidebar";
 import {
@@ -29,7 +30,8 @@ import {
   ClockIcon as RefreshIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/react/24/solid";
-import axios from '../../utils/axiosConfig';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useTestData, getTestDocumentRecords } from '../../testData/documentRecordsTestData';
 
 const StatCard = ({ label, value, icon, iconBg }) => (
   <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300 flex justify-between items-center group">
@@ -133,58 +135,96 @@ const DocumentsRecords = () => {
   const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [chartData, setChartData] = useState([]);
+
+  const currentYear = new Date().getFullYear();
+  const [selectedPeriod, setSelectedPeriod] = useState('all');
+  const [selectedYear, setSelectedYear] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(0); // 0 means no month selected
 
   // Fetch document requests from backend
   const fetchRecords = async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) {
       setIsRefreshing(true);
     }
-    
+
     try {
-      const res = await axios.get('/document-requests');
-      // Map backend data to table format
-      const mapped = res.data.map((item) => ({
-        id: item.id,
-        user: item.user,
-        resident: item.resident,
-        documentType: item.document_type,
-        certificationType: item.certification_type,
-        certificationData: item.certification_data,
-        status: item.status.charAt(0).toUpperCase() + item.status.slice(1),
-        requestDate: item.created_at,
-        approvedDate: item.status === 'approved' ? item.updated_at : null,
-        completedAt: item.completed_at,
-        priority: item.priority,
-        processingNotes: item.processing_notes,
-        estimatedCompletion: item.estimated_completion,
-        purpose: item.fields?.purpose || '',
-        remarks: item.fields?.remarks || '',
-        pdfPath: item.pdf_path,
-        photoPath: item.photo_path,
-        photoType: item.photo_type,
-        photoMetadata: item.photo_metadata,
-      }));
-      setRecords(mapped);
-      setFilteredRecords(mapped);
-      setLastRefresh(new Date());
-      
-      if (showRefreshIndicator) {
-        setToastMessage({
-          type: 'success',
-          message: '🔄 Data refreshed successfully',
-          duration: 2000
-        });
+      // Use test data if flag is enabled (similar to backend test_create_admin_user.php)
+      if (useTestData) {
+        console.log('📊 Using test data for DocumentsRecords component');
+        const data = getTestDocumentRecords();
+        setRecords(data);
+        setFilteredRecords(data);
+        setChartData(generateChartData(data, selectedPeriod, selectedYear, selectedMonth));
+        setLastRefresh(new Date());
+
+        if (showRefreshIndicator) {
+          setToastMessage({
+            type: 'success',
+            message: '🔄 Test data loaded successfully',
+            duration: 2000
+          });
+        }
+      } else {
+        const res = await axiosInstance.get('document-requests');
+        console.log('Fetched document requests:', res.data);
+        // Map backend data to table format
+        const mapped = res.data.map((item) => ({
+          id: item.id,
+          user: item.user,
+          resident: item.resident,
+          documentType: item.document_type,
+          certificationType: item.certification_type,
+          certificationData: item.certification_data,
+          status: item.status.charAt(0).toUpperCase() + item.status.slice(1),
+          requestDate: item.created_at,
+          approvedDate: item.status === 'approved' ? item.updated_at : null,
+          completedAt: item.completed_at,
+          priority: item.priority,
+          processingNotes: item.processing_notes,
+          estimatedCompletion: item.estimated_completion,
+          purpose: item.fields?.purpose || '',
+          remarks: item.fields?.remarks || '',
+          pdfPath: item.pdf_path,
+          photoPath: item.photo_path,
+          photoType: item.photo_type,
+          photoMetadata: item.photo_metadata,
+        }));
+        setRecords(mapped);
+        setFilteredRecords(mapped);
+        setChartData(generateChartData(mapped, selectedPeriod, selectedYear, selectedMonth));
+        setLastRefresh(new Date());
+
+        if (showRefreshIndicator) {
+          setToastMessage({
+            type: 'success',
+            message: '🔄 Data refreshed successfully',
+            duration: 2000
+          });
+        }
       }
     } catch (err) {
-      setRecords([]);
-      setFilteredRecords([]);
-      if (showRefreshIndicator) {
-        setToastMessage({
-          type: 'error',
-          message: '❌ Failed to refresh data',
-          duration: 3000
-        });
+      console.error('Failed to fetch document records:', err);
+      console.error('Error details:', {
+        response: err.response,
+        status: err.response?.status,
+        data: err.response?.data
+      });
+      
+      let errorMessage = '❌ Failed to load data: ';
+      if (err.response) {
+        errorMessage += err.response.data?.message || `Server error (${err.response.status})`;
+      } else if (err.request) {
+        errorMessage += 'Network error. Please check your connection.';
+      } else {
+        errorMessage += err.message || 'Unknown error occurred';
       }
+      
+      setToastMessage({
+        type: 'error',
+        message: errorMessage,
+        duration: 4000
+      });
     } finally {
       if (showRefreshIndicator) {
         setIsRefreshing(false);
@@ -238,6 +278,11 @@ const DocumentsRecords = () => {
     );
   }, [search, records]);
 
+  // Update chart data when records, period, year, or month changes
+  useEffect(() => {
+    setChartData(generateChartData(records, selectedPeriod, selectedYear, selectedMonth));
+  }, [records, selectedPeriod, selectedYear, selectedMonth]);
+
   const handleShowDetails = (record) => {
     if (selectedRecord?.id === record.id) {
       setSelectedRecord(null);
@@ -257,7 +302,7 @@ const DocumentsRecords = () => {
     setFeedback({ type: 'loading', message: 'Saving changes...' });
     
     try {
-      await axios.patch(`/document-requests/${editData.id}`, {
+  await axiosInstance.patch(`/document-requests/${editData.id}`, {
         status: editData.status.toLowerCase(),
         priority: editData.priority,
         estimated_completion: editData.estimatedCompletion,
@@ -331,7 +376,7 @@ const DocumentsRecords = () => {
     });
     
     try {
-      const response = await axios.post(`/document-requests/${record.id}/generate-pdf`);
+  const response = await axiosInstance.post(`/document-requests/${record.id}/generate-pdf`);
       
       setToastMessage({
         type: 'success',
@@ -361,18 +406,54 @@ const DocumentsRecords = () => {
     });
     
     try {
-      const response = await axios.get(`/document-requests/${record.id}/download-pdf`, {
-        responseType: 'blob'
+      // Log request details
+      console.log('Downloading PDF for record:', {
+        id: record.id,
+        documentType: record.documentType,
+        userName: record.user?.name
       });
       
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const response = await axiosInstance.get(`document-requests/${record.id}/download-pdf`, {
+        responseType: 'blob',
+        headers: {
+          'Accept': 'application/pdf'
+        }
+      });
+      
+      // Validate response data
+      if (!response.data || response.data.size === 0) {
+        throw new Error('Received empty PDF data from server');
+      }
+      
+      // Log response details for debugging
+      console.log('PDF download response:', {
+        contentType: response.headers['content-type'],
+        contentLength: response.headers['content-length'],
+        blobSize: response.data.size
+      });
+      
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      
+      // Log blob details
+      console.log('Created Blob:', {
+        size: blob.size,
+        type: blob.type,
+        url: url
+      });
+      
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `${record.documentType}-${record.user?.name || 'certificate'}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url);
+      
+      // Clean up URL after a short delay to ensure download starts
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+        console.log('Cleaned up Blob URL:', url);
+      }, 100);
       
       setToastMessage({
         type: 'success',
@@ -380,9 +461,44 @@ const DocumentsRecords = () => {
         duration: 3000
       });
     } catch (err) {
+      console.error('Download PDF error:', err);
+      console.error('Error details:', {
+        response: err.response,
+        request: err.request,
+        message: err.message,
+        stack: err.stack
+      });
+      
+      let errorMessage = '❌ Failed to download PDF. ';
+      if (err.response) {
+        switch (err.response.status) {
+          case 404:
+            errorMessage += 'Document not found or not yet generated.';
+            break;
+          case 403:
+            errorMessage += 'You do not have permission to download this document.';
+            break;
+          default:
+            errorMessage += err.response?.data?.message || 'Please try again.';
+        }
+        console.error('Response error details:', {
+          status: err.response.status,
+          statusText: err.response.statusText,
+          data: err.response.data
+        });
+      } else if (err.request) {
+        errorMessage += 'Network error. Please check your connection.';
+        console.error('Network error details:', {
+          request: err.request,
+          config: err.config
+        });
+      } else {
+        errorMessage += err.message || 'Please try again.';
+      }
+      
       setToastMessage({
         type: 'error',
-        message: '❌ Failed to download PDF. Please try again.',
+        message: errorMessage,
         duration: 4000
       });
     }
@@ -396,30 +512,260 @@ const DocumentsRecords = () => {
     });
     
     try {
-      const response = await axios.get(`/document-requests/${record.id}/download-pdf`, {
-        responseType: 'blob'
+      // Log request details
+      console.log('Opening PDF for record:', {
+        id: record.id,
+        documentType: record.documentType,
+        userName: record.user?.name
       });
       
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-      window.open(url, '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes');
-      
-      setToastMessage({
-        type: 'success',
-        message: `📄 PDF opened successfully!`,
-        duration: 3000
+      const response = await axiosInstance.get(`document-requests/${record.id}/download-pdf`, {
+        responseType: 'blob',
+        headers: {
+          'Accept': 'application/pdf'
+        }
       });
       
-      // Clean up the URL after a delay
+      // Validate response
+      if (!response.data || response.data.size === 0) {
+        throw new Error('Received empty PDF data from server');
+      }
+      
+      // Log response details
+      console.log('PDF view response:', {
+        contentType: response.headers['content-type'],
+        contentLength: response.headers['content-length'],
+        blobSize: response.data.size
+      });
+      
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      
+      // Log blob details
+      console.log('Created Blob:', {
+        size: blob.size,
+        type: blob.type,
+        url: url
+      });
+      
+      // Open PDF in new window with improved options
+      const pdfWindow = window.open(url, '_blank', 
+        'width=800,height=600,scrollbars=yes,resizable=yes,status=yes,toolbar=yes,menubar=yes');
+      
+      if (pdfWindow) {
+        setToastMessage({
+          type: 'success',
+          message: `📄 PDF opened successfully!`,
+          duration: 3000
+        });
+      } else {
+        throw new Error('Popup window was blocked. Please allow popups for this site.');
+      }
+      
+      // Clean up the URL after a delay to ensure PDF loads
       setTimeout(() => {
         window.URL.revokeObjectURL(url);
+        console.log('Cleaned up Blob URL:', url);
       }, 1000);
+      
     } catch (err) {
+      console.error('View PDF error:', err);
+      console.error('Error details:', {
+        response: err.response,
+        request: err.request,
+        message: err.message,
+        stack: err.stack
+      });
+      
+      let errorMessage = '❌ Failed to open PDF. ';
+      if (err.response) {
+        switch (err.response.status) {
+          case 404:
+            errorMessage += 'Document not found or not yet generated.';
+            break;
+          case 403:
+            errorMessage += 'You do not have permission to view this document.';
+            break;
+          default:
+            errorMessage += err.response?.data?.message || 'Please try again.';
+        }
+        console.error('Response error details:', {
+          status: err.response.status,
+          statusText: err.response.statusText,
+          data: err.response.data
+        });
+      } else if (err.request) {
+        errorMessage += 'Network error. Please check your connection.';
+        console.error('Network error details:', {
+          request: err.request,
+          config: err.config
+        });
+      } else if (err.message.includes('blocked')) {
+        errorMessage += 'Popup was blocked. Please allow popups and try again.';
+      } else {
+        errorMessage += err.message || 'Please try again.';
+      }
+      
       setToastMessage({
         type: 'error',
-        message: '❌ Failed to open PDF. Please try again.',
+        message: errorMessage,
         duration: 4000
       });
     }
+  };
+
+  // Generate chart data for document requests based on period, year, and month
+  const generateChartData = (records, period = 'all', year = '', month = 0) => {
+    const now = new Date();
+    let effectiveYear = year ? parseInt(year) : currentYear;
+    let effectiveMonth = month;
+    let data = [];
+
+    if (period === 'month') {
+      if (effectiveMonth === 0) {
+        // If no specific month, use current month
+        effectiveMonth = now.getMonth() + 1;
+      }
+      if (isNaN(effectiveYear)) {
+        effectiveYear = now.getFullYear();
+      }
+      // Daily data for selected month and year
+      const monthStart = new Date(effectiveYear, effectiveMonth - 1, 1);
+      const monthEnd = new Date(effectiveYear, effectiveMonth, 0);
+      const dailyData = {};
+      records.forEach(record => {
+        if (record.requestDate) {
+          const date = new Date(record.requestDate);
+          if (date >= monthStart && date <= monthEnd) {
+            const dayKey = date.toISOString().split('T')[0];
+            dailyData[dayKey] = (dailyData[dayKey] || 0) + 1;
+          }
+        }
+      });
+      // Fill all days of the month
+      for (let day = 1; day <= monthEnd.getDate(); day++) {
+        const date = new Date(effectiveYear, effectiveMonth - 1, day);
+        const key = date.toISOString().split('T')[0];
+        data.push({
+          name: date.getDate().toString(),
+          requests: dailyData[key] || 0
+        });
+      }
+    } else if (period === 'year') {
+      if (isNaN(effectiveYear)) {
+        effectiveYear = currentYear;
+      }
+      if (effectiveMonth > 0) {
+        // Daily data for selected month in the year
+        const monthStart = new Date(effectiveYear, effectiveMonth - 1, 1);
+        const monthEnd = new Date(effectiveYear, effectiveMonth, 0);
+        const dailyData = {};
+        records.forEach(record => {
+          if (record.requestDate) {
+            const date = new Date(record.requestDate);
+            if (date >= monthStart && date <= monthEnd) {
+              const dayKey = date.toISOString().split('T')[0];
+              dailyData[dayKey] = (dailyData[dayKey] || 0) + 1;
+            }
+          }
+        });
+        // Fill all days of the month
+        for (let day = 1; day <= monthEnd.getDate(); day++) {
+          const date = new Date(effectiveYear, effectiveMonth - 1, day);
+          const key = date.toISOString().split('T')[0];
+          data.push({
+            name: date.getDate().toString(),
+            requests: dailyData[key] || 0
+          });
+        }
+      } else {
+        // Monthly data for selected year
+        const yearlyData = {};
+        records.forEach(record => {
+          if (record.requestDate) {
+            const date = new Date(record.requestDate);
+            if (date.getFullYear() === effectiveYear) {
+              const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+              yearlyData[monthKey] = (yearlyData[monthKey] || 0) + 1;
+            }
+          }
+        });
+        // Fill all months of the year
+        for (let m = 0; m < 12; m++) {
+          const date = new Date(effectiveYear, m, 1);
+          const key = `${effectiveYear}-${String(m + 1).padStart(2, '0')}`;
+          data.push({
+            name: date.toLocaleDateString('en-US', { month: 'short' }),
+            requests: yearlyData[key] || 0
+          });
+        }
+      }
+    } else {
+      // All time - last 12 months
+      const monthlyData = {};
+      records.forEach(record => {
+        if (record.requestDate) {
+          const date = new Date(record.requestDate);
+          const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          monthlyData[monthYear] = (monthlyData[monthYear] || 0) + 1;
+        }
+      });
+
+      // Get last 12 months
+      for (let i = 11; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        data.push({
+          name: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          requests: monthlyData[key] || 0
+        });
+      }
+    }
+    return data;
+  };
+
+  // Get most requested document type based on period, year, and month
+  const getMostRequestedDocument = (records, period = 'all', year = '', month = 0) => {
+    const yearNum = year ? parseInt(year) : currentYear;
+    const monthNum = month;
+    let filtered = records;
+    if (period === 'month' && monthNum > 0) {
+      filtered = records.filter(record => {
+        if (!record.requestDate) return false;
+        const date = new Date(record.requestDate);
+        return date.getMonth() + 1 === monthNum && date.getFullYear() === yearNum;
+      });
+    } else if (period === 'year') {
+      if (monthNum > 0) {
+        filtered = records.filter(record => {
+          if (!record.requestDate) return false;
+          const date = new Date(record.requestDate);
+          return date.getMonth() + 1 === monthNum && date.getFullYear() === yearNum;
+        });
+      } else {
+        filtered = records.filter(record => {
+          if (!record.requestDate) return false;
+          const date = new Date(record.requestDate);
+          return date.getFullYear() === yearNum;
+        });
+      }
+    }
+    // for 'all', use all records
+
+    const counts = {};
+    filtered.forEach(record => {
+      counts[record.documentType] = (counts[record.documentType] || 0) + 1;
+    });
+
+    let max = 0;
+    let most = Object.keys(counts).length > 0 ? '' : 'N/A';
+    for (const [type, count] of Object.entries(counts)) {
+      if (count > max) {
+        max = count;
+        most = type;
+      }
+    }
+    return { type: most, count: max };
   };
 
   // Auto-hide toast messages
@@ -519,6 +865,116 @@ const DocumentsRecords = () => {
               icon={<ClockIcon className="w-6 h-6 text-blue-600" />}
               iconBg="bg-blue-100"
             />
+          </div>
+
+          {/* Analytics Section */}
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 mb-8">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <DocumentTextIcon className="w-5 h-5" />
+                Document Requests Analytics
+              </h3>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => {
+                    setSelectedPeriod(e.target.value);
+                    if (e.target.value !== 'month') setSelectedMonth(0);
+                    if (e.target.value === 'all') {
+                      setSelectedYear('');
+                      setSelectedMonth(0);
+                    }
+                  }}
+                  className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-green-100 focus:border-green-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                >
+                  <option value="month">This Month</option>
+                  <option value="year">This Year</option>
+                  <option value="all">All Time</option>
+                </select>
+                {(selectedPeriod === 'month' || selectedPeriod === 'year') && (
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => {
+                      setSelectedYear(e.target.value);
+                      setSelectedMonth(0);
+                    }}
+                    className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-green-100 focus:border-green-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                  >
+                    <option value="">Select Year</option>
+                    {Array.from({ length: 16 }, (_, i) => currentYear - 10 + i).map(year => (
+                      <option key={year} value={year.toString()}>{year}</option>
+                    ))}
+                  </select>
+                )}
+                {(selectedPeriod === 'month' || selectedPeriod === 'year') && selectedYear && (
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                    className="px-4 py-2 border-2 border-gray-200 focus:ring-4 focus:ring-green-100 focus:border-green-500 rounded-xl text-sm font-medium bg-white shadow-sm"
+                  >
+                    <option value={0}>All Months</option>
+                    {[
+                      { value: 1, name: 'January' },
+                      { value: 2, name: 'February' },
+                      { value: 3, name: 'March' },
+                      { value: 4, name: 'April' },
+                      { value: 5, name: 'May' },
+                      { value: 6, name: 'June' },
+                      { value: 7, name: 'July' },
+                      { value: 8, name: 'August' },
+                      { value: 9, name: 'September' },
+                      { value: 10, name: 'October' },
+                      { value: 11, name: 'November' },
+                      { value: 12, name: 'December' }
+                    ].map(m => (
+                      <option key={m.value} value={m.value}>{m.name}</option>
+                    ))}
+                  </select>
+                )}
+                {(selectedPeriod === 'month' || selectedPeriod === 'year') && !selectedYear && (
+                  <select
+                    disabled
+                    className="px-4 py-2 border-2 border-gray-300 bg-gray-100 text-gray-500 rounded-xl text-sm font-medium cursor-not-allowed"
+                  >
+                    <option>Select a year first</option>
+                  </select>
+                )}
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              {selectedPeriod === 'month' ? `Daily requests in ${selectedMonth ? `${selectedMonth}/${selectedYear}` : 'current month'}` :
+               selectedPeriod === 'year' ? `Monthly requests in ${selectedYear || currentYear}` :
+               'Requests over the last 12 months'}
+            </p>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="requests" stroke="#10b981" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+        
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+                  <DocumentTextIcon className="w-4 h-4" />
+                  Most Requested in Selected Period
+                </h4>
+                <p className="text-lg font-bold text-green-900">{getMostRequestedDocument(records, selectedPeriod, selectedYear, selectedMonth).type}</p>
+                <p className="text-sm text-green-700">{getMostRequestedDocument(records, selectedPeriod, selectedYear, selectedMonth).count} requests</p>
+              </div>
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <h4 className="text-sm font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                  <DocumentTextIcon className="w-4 h-4" />
+                  Most Requested Overall
+                </h4>
+                <p className="text-lg font-bold text-blue-900">{getMostRequestedDocument(records, 'all').type}</p>
+                <p className="text-sm text-blue-700">{getMostRequestedDocument(records, 'all').count} requests</p>
+              </div>
+            </div>
           </div>
 
           {/* Enhanced Search and Add Section */}

@@ -54,11 +54,12 @@ class CheckInactiveUsers extends Command
                 );
 
                 // Log the activity
-                ActivityLogService::logCustom(
+                ActivityLogService::log(
                     'residency_status_update',
-                    "User {$user->name} flagged for review due to inactivity",
                     $user,
-                    ['previous_status' => $user->getOriginal('residency_status'), 'new_status' => 'for_review']
+                    ['residency_status' => $user->getOriginal('residency_status')],
+                    ['residency_status' => 'for_review'],
+                    "User {$user->name} flagged for review due to inactivity"
                 );
             }
         }
