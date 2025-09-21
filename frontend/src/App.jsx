@@ -27,7 +27,7 @@ import StatusAssetRequests from './pages/residents/modules/Assets/StatusAssetReq
 import AssetsManagement from './pages/admin/modules/Assets/AssetsManagement';
 import BlotterRequest from './pages/admin/modules/Blotter/BlotterRequest';
 import NewComplaint from './pages/admin/modules/Blotter/NewComplaint';
-import StaffManagement from './pages/admin/modules/Barangay Officials/StaffManagement';
+import StaffManagement from './pages/admin/modules/Staff/StaffManagement';
 import OfficialsManagement from './pages/admin/modules/Barangay Officials/OfficialsManagement';
 
 const adminRoutes = [
@@ -38,6 +38,7 @@ const adminRoutes = [
   { path: "blotterRecords", element: <AdminPages.BlotterRecords /> },
   { path: "financialTracking", element: <AdminPages.FinancialTracking /> },
   { path: "barangayOfficials", element: <AdminPages.BarangayOfficials /> },
+  { path: "staff", element: <StaffManagement /> },
   { path: "communicationAnnouncement", element: <AdminPages.CommunicationAnnouncement /> },
   { path: "disasterEmergency", element: <AdminPages.DisasterEmergency /> },
   { path: "inventoryAssets", element: <AdminPages.InventoryAssets /> },

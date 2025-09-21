@@ -81,7 +81,63 @@ class ResidentController extends Controller
         ], 201);
     }
 
-    // 📄 Get all residents with profiles
+    // Search residents
+    public function search(Request $request)
+    {
+        try {
+            $searchTerm = $request->get('search');
+            
+            if (empty($searchTerm)) {
+                return response()->json([]);
+            }
+
+            $residents = Profile::join('residents', 'profiles.id', '=', 'residents.profile_id')
+            ->select(
+                'profiles.id',
+                'residents.resident_id',
+                'profiles.first_name',
+                'profiles.last_name',
+                'profiles.email',
+                'profiles.mobile_number as contact_number',
+                'profiles.birth_date as birthdate',
+                'profiles.sex as gender',
+                'profiles.civil_status',
+                'profiles.current_address as address'
+            )
+            ->where(function ($query) use ($searchTerm) {
+                $query->where('profiles.first_name', 'like', '%' . $searchTerm . '%')
+                      ->orWhere('profiles.last_name', 'like', '%' . $searchTerm . '%')
+                      ->orWhere('residents.resident_id', 'like', '%' . $searchTerm . '%')
+                      ->orWhere('profiles.email', 'like', '%' . $searchTerm . '%')
+                      ->orWhere('profiles.mobile_number', 'like', '%' . $searchTerm . '%');
+            })
+            ->take(10)
+            ->get()
+            ->map(function ($resident) {
+                return [
+                    'id' => $resident->id,  // Keep the profile id as the unique identifier
+                    'resident_id' => $resident->resident_id,  // The resident ID from residents table
+                    'first_name' => $resident->first_name,
+                    'last_name' => $resident->last_name,
+                    'name' => trim($resident->first_name . ' ' . $resident->last_name),
+                    'email' => $resident->email,
+                    'contact_number' => $resident->contact_number,
+                    'address' => $resident->address,
+                    'birthdate' => $resident->birthdate,
+                    'gender' => strtolower($resident->gender),
+                    'civil_status' => strtolower($resident->civil_status)
+                ];
+            });
+
+            return response()->json($residents);
+            
+        } catch (\Exception $e) {
+            \Log::error('Resident search error: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to search residents'], 500);
+        }
+    }
+
+    // �📄 Get all residents with profiles
     public function index()
     {
         \Log::info('Admin is fetching residents list');

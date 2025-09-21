@@ -21,6 +21,7 @@ const Sidebar = () => {
     { title: "Blotter Scheduling Records", icon: <Book size={iconSize} />, path: "/admin/blotterRecords" },
     { title: "Financial Tracking", icon: <DollarSign size={iconSize} />, path: "/admin/financialTracking" },
     { title: "Barangay Official & Staff", icon: <UserCog size={iconSize} />, path: "/admin/barangayOfficials" },
+    { title: "Staff Accounts", icon: <Users size={iconSize} />, path: "/admin/staff" },
     { title: "Communication & Announcement", icon: <Megaphone size={iconSize} />, path: "/admin/communicationAnnouncement" },
     { title: "Social Services", icon: <Handshake size={iconSize} />, path: "/admin/socialServices" },
     { title: "Disaster & Emergency", icon: <AlertTriangle size={iconSize} />, path: "/admin/disasterEmergency" },

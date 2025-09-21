@@ -37,18 +37,8 @@ Route::get('/test-connection', function() {
     ]);
 });
 
-// Admin Routes Group
-Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
-    // Staff Management Routes
-    Route::get('/staff', [StaffController::class, 'index']);
-    Route::post('/staff', [StaffController::class, 'store']);
-    Route::get('/staff/{id}', [StaffController::class, 'show']);
-    Route::put('/staff/{id}', [StaffController::class, 'update']);
-    Route::delete('/staff/{id}', [StaffController::class, 'destroy']);
-
-    // Residents Search Route
-    Route::get('/residents/search', [ResidentController::class, 'search']);
-});
+// Search residents
+Route::get('/residents/search', [ResidentController::class, 'search'])->middleware(['auth:sanctum', 'admin']);
 
 // Restore a soft deleted resident by ID
 Route::post('/residents/{id}/restore', [App\Http\Controllers\ResidentRestoreController::class, 'restore'])->middleware(['auth:sanctum', 'admin']);
